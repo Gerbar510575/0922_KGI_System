@@ -133,3 +133,38 @@ def step_back_search(payload: dict):
         model=model,
         temperature=temperature,
     )
+
+# apps/rag-service/service.py （新增）
+from .hyde_rag import run_hyde_rag
+
+@app.post("/hyde_search")
+def hyde_search(payload: dict):
+    """
+    payload:
+      {
+        "query": "你的問題",
+        "backend": "qdrant" | "chroma",    # 預設 qdrant
+        "topk": 4,                          # 檢索 K
+        "urls": ["https://..."],            # backend=chroma 時可選
+        "ctx_topn": 4,                      # 回答時拼接的段落數
+        "model": "gemini-2.5-flash",
+        "temperature": 0.0
+      }
+    """
+    q = payload.get("query", "")
+    backend = payload.get("backend", "qdrant")
+    topk = int(payload.get("topk", 4))
+    urls = payload.get("urls", None)
+    ctx_topn = int(payload.get("ctx_topn", 4))
+    model = payload.get("model", "gemini-2.5-flash")
+    temperature = float(payload.get("temperature", 0.0))
+
+    return run_hyde_rag(
+        question=q,
+        backend=backend,
+        topk=topk,
+        urls=urls,
+        ctx_topn=ctx_topn,
+        model=model,
+        temperature=temperature
+    )

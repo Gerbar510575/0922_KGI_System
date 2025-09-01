@@ -34,3 +34,9 @@ async def step_back(payload: dict):
     async with httpx.AsyncClient(timeout=60) as c:
         r = await c.post(f"{RAG_URL}/step_back_search", json=payload)
     return r.json()
+
+@router.post("/hyde")
+async def hyde(payload: dict):
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.post(f"{RAG_URL}/hyde_search", json=payload)
+    return r.json()
