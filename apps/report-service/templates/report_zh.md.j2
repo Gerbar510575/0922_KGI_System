@@ -1,0 +1,39 @@
+# 個人化投資建議分析報告
+
+- 客戶：**{{ client.name }}**
+- 風險屬性：{{ client.risk_level }}　|　投資目標：{{ client.goal }}　|　投資期限：{{ client.horizon_years }} 年
+
+## 一、建議資產配置
+![配置圖]({{ charts.alloc_pie }})
+
+{% for k,v in advice.target_allocation.items() -%}
+- {{ k }}：**{{ (v*100)|round(0) }}%**
+{% endfor %}
+
+## 二、建議商品清單
+| 商品 | 類別 | 建議比重 | 費用率 | 幣別 | 區域 | 理由 |
+|---|---|---:|---:|:---:|:---:|---|
+{% for p in advice.picks -%}
+| {{ p.name }} ({{ p.ticker }}) | {{ p.asset_class }} | {{ (p.weight*100)|round(1) }}% | {{ p.fee }} | {{ p.currency }} | {{ p.region }} | 低費用、規模{{ p.aum }} |
+{% endfor %}
+
+{% if advice.suitability_flags %}
+> **適合度提醒**  
+{% for f in advice.suitability_flags -%}
+- {{ f.ticker }}：{{ f.issue }}
+{% endfor %}
+{% endif %}
+
+## 三、依據與引用（RAG）
+{% for h in refs.hits -%}
+- 來源：{{ h.source }}  
+  摘要：{{ h.chunk }}
+{% endfor %}
+
+{% if charts.price %}
+## 四、代表性商品走勢
+![走勢圖]({{ charts.price }})
+{% endif %}
+
+## 五、風險揭露與聲明
+本報告為投資建議示範，投資有風險，過去績效不代表未來表現。建議搭配完整 KYC 與適合度評估。
