@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 import httpx, os
 from .routers import rag  # 若放平行資料夾，請依實際相對匯入調整
+from routers import auto_rag
 
 MKT  = os.getenv("MKT_URL",  "http://market:8001")
 RAG  = os.getenv("RAG_URL",  "http://rag:8002")
@@ -9,6 +10,7 @@ RPT  = os.getenv("RPT_URL",  "http://report:8004")
 
 app = FastAPI(title="KFH Advisor Gateway")
 app.include_router(rag.router)
+app.include_router(auto_rag.router)
 
 @app.get("/health")
 def health(): return {"ok": True}

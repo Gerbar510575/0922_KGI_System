@@ -1,23 +1,33 @@
 # apps/rag-service/multi_query_rag.py
 # -*- coding: utf-8 -*-
 import os, json, bs4
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 from operator import itemgetter
 from dotenv import load_dotenv
 
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
+#from langchain.text_splitter import RecursiveCharacterTextSplitter
+#from langchain_community.vectorstores import Chroma
+#from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
 
 import google.genai as genai
 from google.genai import types as gtypes
+from google.genai import types
 
 from qdrant_client import QdrantClient
 from langchain_community.vectorstores import Qdrant as LCQdrant
 
+# 共用檢索工具
+from .retrieval_utils import (
+    build_qdrant_retriever,
+    build_chroma_retriever,
+    get_unique_union,
+    collect_context_items,
+)
+
+# ===== 讀取 API key 並初始化 Gemini =====
 load_dotenv()
 api_key = os.getenv("GENAI_API_KEY")
 if not api_key:
@@ -28,85 +38,86 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 COLLECTION  = os.getenv("QDRANT_COLLECTION", "kfh_docs_gemini")
 
-# -------- Gemini LLM / Embeddings 封裝 --------
+# -------- Gemini LLM --------
 class GeminiLLM:
-    def __init__(self, model="models/gemini-2.5-flash", temperature=0.0):
-        self.model = model; self.temperature = temperature
-    def __call__(self, prompt: str) -> str:
-        r = _gclient.models.generate_content(model=self.model, contents=prompt)
-        return r.text or ""
+    """封裝 Gemini 生成模型，讓物件可直接被 LCEL 呼叫"""
+    def __init__(self, model: str = "models/gemini-2.5-flash", temperature: float = 0.0):
+        self.model = model
+        self.temperature = temperature
 
+    def __call__(self, prompt: str) -> str:
+        resp = _gclient.models.generate_content(model=self.model, contents=prompt)
+        return resp.text or ""
+
+# ===== Embeddings 封裝（供 Chroma/Qdrant 用）=====
 class GeminiEmbeddings:
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        out = []
+        vecs = []
         for t in texts:
             r = _gclient.models.embed_content(
                 model="models/text-embedding-004",
                 contents=t,
-                config=gtypes.EmbedContentConfig(task_type="retrieval_document"),
+                config=types.EmbedContentConfig(task_type="retrieval_document"),
             )
-            out.append(r.embeddings[0].values)
-        return out
+            vecs.append(r.embeddings[0].values)
+        return vecs
+
     def embed_query(self, text: str) -> List[float]:
         r = _gclient.models.embed_content(
             model="models/text-embedding-004",
             contents=text,
-            config=gtypes.EmbedContentConfig(task_type="retrieval_query"),
+            config=types.EmbedContentConfig(task_type="retrieval_query"),
         )
         return r.embeddings[0].values
 
-# -------- Multi-Query 生成 & 去重 --------
-def build_multi_query_chain(llm) -> callable:
-    tmpl = (
-        "You are an AI language model assistant. Generate five different versions of the "
-        "user question to improve vector search recall. Separate with newlines. "
+# ===== Multi-Query 產生鏈 =====
+def build_multi_query_chain(llm: GeminiLLM):
+    template = (
+        "You are an AI assistant. Generate five different versions of the given user question "
+        "to retrieve relevant documents from a vector database. Provide them line by line.\n"
         "Original question: {question}"
     )
-    return (PromptTemplate.from_template(tmpl) | llm | StrOutputParser() | (lambda x: [q for q in x.split("\n") if q.strip()]))
-
-def get_unique_union(doc_lists: List[List[Document]]) -> List[Document]:
-    flat = [json.dumps(d.dict(), ensure_ascii=False) for sub in doc_lists for d in sub]
-    uniq = list(set(flat))
-    return [Document(**json.loads(s)) for s in uniq]
-
-# -------- Retrievers --------
-def build_qdrant_retriever(top_k=3):
-    client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
-    emb = GeminiEmbeddings()
-    vs = LCQdrant(client=client, collection_name=COLLECTION, embeddings=emb)
-    return vs.as_retriever(search_kwargs={"k": top_k})
-
-def build_chroma_retriever(docs_dir="data/docs", urls: List[str]=None, chunk_size=800, chunk_overlap=200, top_k=3):
-    docs: List[Document] = []
-    if os.path.isdir(docs_dir):
-        for n in os.listdir(docs_dir):
-            if n.lower().endswith(".pdf"):
-                docs.extend(PyPDFLoader(os.path.join(docs_dir, n)).load())
-    if urls:
-        loader = WebBaseLoader(web_paths=tuple(urls), bs_kwargs=dict(parse_only=bs4.SoupStrainer(class_=("post-content","post-title","post-header"))))
-        docs.extend(loader.load())
-    if not docs:
-        raise RuntimeError("Chroma 構建失敗：沒有文件")
-    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    chunks = splitter.split_documents(docs)
-    vs = Chroma.from_documents(documents=chunks, embedding=GeminiEmbeddings())
-    return vs.as_retriever(search_kwargs={"k": top_k})
+    prompt = PromptTemplate.from_template(template)
+    return prompt | llm | StrOutputParser() | (lambda x: [q.strip() for q in x.split("\n") if q.strip()])
 
 # -------- Final RAG Chain --------
-def build_final_rag_chain(retriever, llm) -> Tuple[callable, callable]:
-    gen_queries = build_multi_query_chain(llm)
-    retrieval_chain = gen_queries | retriever.map() | get_unique_union
-    prompt = PromptTemplate.from_template("Answer the question using the context:\n\n{context}\n\nQuestion: {question}")
-    final_chain = ({"context": retrieval_chain, "question": itemgetter("question")} | prompt | llm | StrOutputParser())
+def build_final_rag_chain(retriever, llm: GeminiLLM):
+    rag_template = (
+        "Answer the following question based on this context:\n\n"
+        "{context}\n\n"
+        "Question: {question}"
+    )
+    prompt = PromptTemplate.from_template(rag_template)
+
+    # 多視角 → 檢索（map）→ 去重 → 拼 context → 生成
+    generate_queries = build_multi_query_chain(llm)
+    retrieval_chain = generate_queries | retriever.map() | get_unique_union
+    final_chain = (
+        {
+            "context": lambda x: "\n\n---\n\n".join([d.page_content for d in retrieval_chain.invoke(x)[:8]]),
+            "question": itemgetter("question"),
+        }
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
     return final_chain, retrieval_chain
 
-def run_multi_query_rag(question: str, backend: str="qdrant", top_k: int=3, urls: List[str]=None) -> dict:
-    llm = GeminiLLM()
-    retriever = build_qdrant_retriever(top_k) if backend=="qdrant" else build_chroma_retriever(urls=urls, top_k=top_k)
+# ===== 對外主入口 =====
+def run_multi_query_rag(
+    question: str,
+    backend: str = "qdrant",    # "qdrant" | "chroma"
+    top_k: int = 3,
+    urls: List[str] | None = None,
+    model: str = "models/gemini-2.5-flash",
+    temperature: float = 0.0,
+) -> Dict[str, Any]:
+    llm = GeminiLLM(model=model, temperature=temperature)
+    retriever = build_qdrant_retriever(top_k=top_k) if backend == "qdrant" else build_chroma_retriever(urls=urls, top_k=top_k)
     final_chain, retrieval_chain = build_final_rag_chain(retriever, llm)
-    docs = retrieval_chain.invoke({"question": question})
-    ans  = final_chain.invoke({"question": question})
-    ctx = [{"source": (d.metadata or {}).get("source") or (d.metadata or {}).get("file_path") or "unknown",
-            "page_content": d.page_content[:800]} for d in docs]
-    return {"answer": ans, "contexts": ctx, "backend": backend}
 
+    docs: List[Document] = retrieval_chain.invoke({"question": question})
+    ans = final_chain.invoke({"question": question})
+    ctx = collect_context_items(docs, top_k=8)
+
+    return {"answer": ans, "contexts": ctx, "backend": backend}
