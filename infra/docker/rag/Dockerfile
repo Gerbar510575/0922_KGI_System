@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 WORKDIR /app
-COPY apps/gateway/requirements.txt .
+COPY apps/rag-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY apps/gateway /app
+COPY apps/rag-service /app
 ENV PYTHONUNBUFFERED=1
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "service:app", "--host", "0.0.0.0", "--port", "8002"]
