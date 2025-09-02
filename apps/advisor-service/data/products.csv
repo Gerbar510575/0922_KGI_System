@@ -1,0 +1,4 @@
+ticker,name,asset_class,fee,aum,currency,region,risk,esg
+TWD001,台灣指數基金,equities,0.5,100000000,TWD,台灣,中,Y
+TWD002,台灣債券基金,fixed_income,0.3,80000000,TWD,台灣,低,Y
+USD001,美國科技基金,equities,1.0,200000000,USD,美國,高,N
