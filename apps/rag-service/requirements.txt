@@ -1,18 +1,14 @@
 fastapi==0.115.0
 uvicorn==0.30.6
-qdrant-client==1.10.1
-#sentence-transformers==3.0.1
-pdfminer.six==20240706
-numpy==1.26.4
-
-# RAG + Multi-Query 所需
 langchain==0.3.2
 langchain-core==0.3.9
 langchain-community==0.3.1
+google-genai==0.2.2
+python-dotenv==1.0.1
+qdrant-client==1.10.1
 chromadb==0.5.5
 beautifulsoup4==4.12.3
 tiktoken==0.7.0
-
-# Gemini
-google-genai==0.2.2
-python-dotenv==1.0.1
+pdfminer.six==20231228
+pypdf
+langchain-google-genai

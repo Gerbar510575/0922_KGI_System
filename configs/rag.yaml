@@ -1,0 +1,7 @@
+# 檢索/切片參數（供 indexer 或臨時 Chroma 使用）
+collection: kfh_docs_gemini
+chunk_size: 800
+chunk_overlap: 200
+embed_model: models/text-embedding-004
+llm_model: models/gemini-2.5-flash
+topk_default: 3

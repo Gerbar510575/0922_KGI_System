@@ -1,44 +1,105 @@
 version: "3.9"
+
 services:
   qdrant:
-    image: qdrant/qdrant:v1.11.0
-    ports: ["6333:6333"]
-    volumes: ["./infra/qdrant_storage:/qdrant/storage"]
+    image: qdrant/qdrant:v1.10.0
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
 
   redis:
-    image: redis:7
-    ports: ["6379:6379"]
-
-  gateway:
-    build: ./infra/docker/gateway
-    env_file: .env
-    ports: ["8000:8000"]
-    depends_on: [market, rag, advisor, report]
-
-  market:
-    build: ./infra/docker/market
-    env_file: .env
-    ports: ["8001:8001"]
-    depends_on: [redis]
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
 
   rag:
-    build: ./infra/docker/rag
-    env_file: .env
-    ports: ["8002:8002"]
-    depends_on: [qdrant]
+    build:
+      context: ..
+      dockerfile: infra/docker/rag-service/Dockerfile
+    container_name: rag
+    env_file:
+      - ../.env                 # 從根目錄載入 .env -> 變成容器環境變數
+    environment:
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      QDRANT_COLLECTION: kfh_docs_gemini
+      USER_AGENT: "kfh-rag/1.0"
+    volumes:
+      - ../apps/rag-service:/app
+      - ../configs:/configs:ro
+      - ../.env:/app/.env:ro    # 讓 load_dotenv() 也能在容器內讀到同一份 .env
+    depends_on:
+      - qdrant
+    ports:
+      - "8002:8002"
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: infra/docker/gateway/Dockerfile
+    container_name: gateway
+    environment:
+      RAG_URL: http://rag:8002
+    volumes:
+      - ../apps/gateway:/app
+    depends_on:
+      - rag
+    ports:
+      - "8000:8000"
 
   advisor:
-    build: ./infra/docker/advisor
-    env_file: .env
-    ports: ["8003:8003"]
+    build:
+      context: ..
+      dockerfile: infra/docker/advisor-service/Dockerfile
+    container_name: advisor
+    volumes:
+      - ../apps/advisor-service:/app
+    ports:
+      - "8003:8003"
 
   report:
-    build: ./infra/docker/report
-    env_file: .env
-    ports: ["8004:8004"]
+    build:
+      context: ..
+      dockerfile: infra/docker/report-service/Dockerfile
+    container_name: report
+    volumes:
+      - ../apps/report-service:/app
+    ports:
+      - "8004:8004"
+
+  market:
+    build:
+      context: ..
+      dockerfile: infra/docker/market-service/Dockerfile
+    container_name: market
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MARKET_TTL_SEC: 90
+    volumes:
+      - ../apps/market-service:/app
+    depends_on:
+      - redis
+    ports:
+      - "8005:8005"
 
   ui:
-    build: ./infra/docker/ui
-    env_file: .env
-    ports: ["8501:8501"]
-    depends_on: [gateway]
+    build:
+      context: ..
+      dockerfile: infra/docker/ui/Dockerfile
+    container_name: ui
+    environment:
+      GATEWAY_URL: http://gateway:8000
+    volumes:
+      - ../apps/ui:/app
+    depends_on:
+      - gateway
+    ports:
+      - "8501:8501"
+
+volumes:
+  qdrant_data:
+

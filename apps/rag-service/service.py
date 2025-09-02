@@ -1,17 +1,34 @@
 # apps/rag-service/service.py
-from fastapi import FastAPI
+from fastapi import FastAPI, Body, HTTPException
 import os
 from dotenv import load_dotenv
-
 from qdrant_client import QdrantClient
 
 import google.genai as genai
 from google.genai import types as gtypes
 
+# 策略實作
+from multi_query_rag import run_multi_query_rag
+from rag_fusion import run_rag_fusion
+from decompose_rag import run_decompose_rag
+from step_back_rag import run_step_back_rag
+from hyde_rag import run_hyde_rag
+
+# baseline / 工具
+from retrieval_utils import (
+    build_qdrant_retriever,
+    join_docs,
+    collect_context_items,
+)
+
+# ---------------- Init ----------------
 load_dotenv()
+os.environ.setdefault("USER_AGENT", "kfh-rag/1.0")
+
 GENAI_API_KEY = os.getenv("GENAI_API_KEY")
 if not GENAI_API_KEY:
     raise ValueError("請在 .env 設定 GENAI_API_KEY")
+
 _gclient = genai.Client(api_key=GENAI_API_KEY)
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
@@ -20,6 +37,7 @@ COLLECTION  = os.getenv("QDRANT_COLLECTION", "kfh_docs_gemini")
 
 app = FastAPI(title="RAG Service (Gemini)")
 
+# ---------------- Embedding ----------------
 def embed_query(text: str):
     r = _gclient.models.embed_content(
         model="models/text-embedding-004",
@@ -28,7 +46,114 @@ def embed_query(text: str):
     )
     return r.embeddings[0].values
 
-# --- 簡單檢索（Gemini 向量） ---
+@app.get("/health")
+def health():
+    return {"ok": True, "service": "rag"}
+
+# ---------------- Baseline ----------------
+def _baseline_answer(question: str, backend: str = "qdrant", topk: int = 3) -> dict:
+    """最小可用：直接向量檢索 + Gemini 生成回答。"""
+    try:
+        retr = build_qdrant_retriever(top_k=topk)
+        docs = retr.invoke(question)
+    except Exception as e:
+        docs = []
+        context_txt = ""
+    else:
+        context_txt = join_docs(docs, top_k=min(topk, 6))
+
+    prompt = (
+        "Use the given context to answer the question. "
+        "If the answer is not in the context, say you don't know.\n\n"
+        f"Context:\n{context_txt}\n\nQuestion: {question}"
+    )
+    try:
+        resp = _gclient.models.generate_content(
+            model="models/gemini-2.5-flash",
+            contents=prompt
+        )
+        answer = (resp.text or "").strip()
+    except Exception as e:
+        answer = f"(baseline generation failed: {e})"
+
+    return {
+        "route_used": "baseline_search",
+        "backend": backend,
+        "answer": answer,
+        "contexts": collect_context_items(docs, top_k=min(topk, 6)) if docs else [],
+        "meta": {"note": "baseline fallback"},
+    }
+
+# ---------------- Strategies ----------------
+def _exec_strategy(strategy: str, payload: dict) -> dict:
+    """封裝不同策略的呼叫，出錯會 raise，交給上層 fallback"""
+    q = payload.get("query", "")
+    backend  = payload.get("backend", "qdrant")
+    topk     = int(payload.get("topk", 3))
+    ctx_topn = int(payload.get("ctx_topn", 6))
+
+    if strategy == "multi_query":
+        return run_multi_query_rag(q, backend=backend, topk=topk, ctx_topn=ctx_topn)
+    elif strategy == "rag_fusion":
+        return run_rag_fusion(q, backend=backend, top_k=topk, top_n_context=ctx_topn)
+    elif strategy == "step_back":
+        return run_step_back_rag(q, backend=backend, topk_normal=topk, topk_step=topk)
+    elif strategy == "hyde":
+        return run_hyde_rag(q, backend=backend, topk=topk, ctx_topn=ctx_topn)
+    elif strategy == "decompose":
+        return run_decompose_rag(
+            q, backend=backend, top_k=topk,
+            strategy="accumulate", topn_context_per_subq=min(ctx_topn, 4)
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"unknown strategy: {strategy}")
+
+def _auto_select_strategy(q: str) -> str:
+    ql = q.strip()
+    low = ql.lower()
+    if len(ql) > 48 or any(k in ql for k in ["、", "；", "以及", "與", "與否"]):
+        return "rag_fusion"
+    if any(k in low for k in ["why", "風險", "來源", "risk", "原因"]):
+        return "step_back"
+    if any(k in low for k in ["what is", "是什麼", "定義", "explain", "解釋"]):
+        return "hyde"
+    return "multi_query"
+
+# ---------------- Routes ----------------
+@app.post("/auto")
+def rag_auto(payload: dict = Body(...)):
+    q = payload.get("query", "")
+    if not q:
+        raise HTTPException(status_code=400, detail="query is required")
+
+    chosen = payload.get("strategy") or _auto_select_strategy(q)
+
+    # 先試選定策略
+    try:
+        result = _exec_strategy(chosen, payload)
+        result.setdefault("route_used", chosen)
+        result.setdefault("backend", payload.get("backend", "qdrant"))
+        return result
+    except Exception as e:
+        pass
+
+    # 預設 fallback 順序
+    for name in ["multi_query", "rag_fusion", "hyde", "step_back", "decompose"]:
+        try:
+            result = _exec_strategy(name, payload)
+            result.setdefault("route_used", name)
+            result.setdefault("backend", payload.get("backend", "qdrant"))
+            return result
+        except Exception:
+            continue
+
+    # 全部失敗 → baseline
+    return _baseline_answer(
+        question=q,
+        backend=payload.get("backend", "qdrant"),
+        topk=int(payload.get("topk", 3))
+    )
+
 @app.post("/search")
 def search(payload: dict):
     query = payload.get("query", "")
@@ -36,135 +161,14 @@ def search(payload: dict):
     vec = embed_query(query)
     qc = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
     res = qc.search(collection_name=COLLECTION, query_vector=list(vec), limit=topk)
-    return {"query": query,
-            "hits": [{"score": float(h.score), "source": h.payload.get("source",""), "chunk": h.payload["chunk"][:600]} for h in res]}
-
-# --- Multi-Query（Gemini） ---
-from .multi_query_rag import run_multi_query_rag
-
-@app.post("/multi_query_search")
-def multi_query_search(payload: dict):
-    q = payload.get("query", "")
-    backend = payload.get("backend", "qdrant")  # qdrant | chroma
-    topk = int(payload.get("topk", 3))
-    urls = payload.get("urls", None)
-    return run_multi_query_rag(question=q, backend=backend, top_k=topk, urls=urls)
-
-# === 新增：RAG-Fusion (RRF) ===
-from .rag_fusion import run_rag_fusion
-
-@app.post("/rag_fusion_search")
-def rag_fusion_search(payload: dict):
-    """
-    payload:
-      {
-        "query": "你的問題",
-        "backend": "qdrant" | "chroma",      # 預設 qdrant
-        "topk": 3,                            # 每個子查詢取回的 K
-        "urls": ["https://..."],              # backend=chroma 時可選
-        "topn_context": 8                     # 最終回答拼接的段落數
-      }
-    """
-    q = payload.get("query", "")
-    backend = payload.get("backend", "qdrant")
-    topk = int(payload.get("topk", 3))
-    urls = payload.get("urls", None)
-    topn = int(payload.get("topn_context", 8))
-    return run_rag_fusion(question=q, backend=backend, top_k=topk, urls=urls, top_n_context=topn)
-
-# apps/rag-service/service.py （新增段落）
-from .decompose_rag import run_decompose_rag
-
-@app.post("/decompose_search")
-def decompose_search(payload: dict):
-    """
-    payload:
-      {
-        "query": "你的主問題",
-        "backend": "qdrant" | "chroma",    # 預設 qdrant
-        "topk": 3,                          # 每題檢索 K
-        "urls": ["https://..."],            # backend=chroma 時可選
-        "strategy": "accumulate" | "parallel",
-        "topn_context_per_subq": 4          # 每題取前 N 段拼 context
-      }
-    """
-    q = payload.get("query", "")
-    backend = payload.get("backend", "qdrant")
-    topk = int(payload.get("topk", 3))
-    urls = payload.get("urls", None)
-    strategy = payload.get("strategy", "accumulate")
-    topn_ctx = int(payload.get("topn_context_per_subq", 4))
-    return run_decompose_rag(
-        question=q, backend=backend, top_k=topk, urls=urls,
-        strategy=strategy, topn_context_per_subq=topn_ctx
-    )
-
-# apps/rag-service/service.py （新增）
-from .step_back_rag import run_step_back_rag
-
-@app.post("/step_back_search")
-def step_back_search(payload: dict):
-    """
-    payload:
-      {
-        "query": "你的問題",
-        "backend": "qdrant" | "chroma",    # 預設 qdrant
-        "topk_normal": 4,
-        "topk_step": 4,
-        "urls": ["https://..."],           # backend=chroma 時可選
-        "model": "gemini-2.5-flash",
-        "temperature": 0.0
-      }
-    """
-    q = payload.get("query", "")
-    backend = payload.get("backend", "qdrant")
-    topk_normal = int(payload.get("topk_normal", 4))
-    topk_step   = int(payload.get("topk_step", 4))
-    urls = payload.get("urls", None)
-    model = payload.get("model", "gemini-2.5-flash")
-    temperature = float(payload.get("temperature", 0.0))
-
-    return run_step_back_rag(
-        question=q,
-        backend=backend,
-        topk_normal=topk_normal,
-        topk_step=topk_step,
-        urls=urls,
-        model=model,
-        temperature=temperature,
-    )
-
-# apps/rag-service/service.py （新增）
-from .hyde_rag import run_hyde_rag
-
-@app.post("/hyde_search")
-def hyde_search(payload: dict):
-    """
-    payload:
-      {
-        "query": "你的問題",
-        "backend": "qdrant" | "chroma",    # 預設 qdrant
-        "topk": 4,                          # 檢索 K
-        "urls": ["https://..."],            # backend=chroma 時可選
-        "ctx_topn": 4,                      # 回答時拼接的段落數
-        "model": "gemini-2.5-flash",
-        "temperature": 0.0
-      }
-    """
-    q = payload.get("query", "")
-    backend = payload.get("backend", "qdrant")
-    topk = int(payload.get("topk", 4))
-    urls = payload.get("urls", None)
-    ctx_topn = int(payload.get("ctx_topn", 4))
-    model = payload.get("model", "gemini-2.5-flash")
-    temperature = float(payload.get("temperature", 0.0))
-
-    return run_hyde_rag(
-        question=q,
-        backend=backend,
-        topk=topk,
-        urls=urls,
-        ctx_topn=ctx_topn,
-        model=model,
-        temperature=temperature
-    )
+    return {
+        "query": query,
+        "hits": [
+            {
+                "score": float(h.score),
+                "source": (h.payload.get("source", "") if h.payload else ""),
+                "chunk": (h.payload.get("chunk", "")[:600] if h.payload else "")
+            }
+            for h in res
+        ],
+    }

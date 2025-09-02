@@ -22,3 +22,4 @@ for pdf in Path("data/docs").glob("*.pdf"):
                                payload={"chunk": ch, "source": pdf.name}))
 cli.upsert(COL, points=pts)
 print(f"Indexed {len(pts)} chunks")
+

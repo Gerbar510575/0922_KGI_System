@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Data / outputs
+apps/rag-service/data/docs/*
+!apps/rag-service/data/docs/.keep
+
+# Env
+.env
+
+# Cache
+*.log
+.cache/
+.pytest_cache/

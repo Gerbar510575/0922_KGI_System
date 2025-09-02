@@ -8,9 +8,6 @@ from dotenv import load_dotenv
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
-#from langchain.text_splitter import RecursiveCharacterTextSplitter
-#from langchain_community.vectorstores import Chroma
-#from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
 
 import google.genai as genai
 from google.genai import types as gtypes
@@ -20,7 +17,7 @@ from qdrant_client import QdrantClient
 from langchain_community.vectorstores import Qdrant as LCQdrant
 
 # 共用檢索工具
-from .retrieval_utils import (
+from retrieval_utils import (
     build_qdrant_retriever,
     build_chroma_retriever,
     get_unique_union,
@@ -121,3 +118,4 @@ def run_multi_query_rag(
     ctx = collect_context_items(docs, top_k=8)
 
     return {"answer": ans, "contexts": ctx, "backend": backend}
+

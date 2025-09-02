@@ -11,7 +11,10 @@
 import os, json, bs4
 from typing import List, Tuple, Dict, Any
 from dotenv import load_dotenv
+import google.genai as genai
+from google.genai import types
 
+from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Qdrant as LCQdrant
@@ -19,10 +22,45 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
 from qdrant_client import QdrantClient
 
-# 從現有模組沿用 GeminiEmbeddings（內部以 google.genai 實作）
-from .multi_query_rag import GeminiEmbeddings
-
+# --- Load ENV ---
 load_dotenv()
+_GENAI_API_KEY = os.getenv("GENAI_API_KEY")
+if not _GENAI_API_KEY:
+    raise ValueError("Please set GENAI_API_KEY in .env")
+
+_genai_client = genai.Client(api_key=_GENAI_API_KEY)
+
+# --- Embeddings Wrapper ---
+class GeminiEmbeddings(Embeddings):
+    """Google Gemini text-embedding-004 for docs & queries."""
+
+    def __init__(self, debug: bool = False):
+        self.debug = debug
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        vecs = []
+        for t in texts:
+            resp = _genai_client.models.embed_content(
+                model="models/text-embedding-004",
+                contents=t,
+                config=types.EmbedContentConfig(task_type="retrieval_document"),
+            )
+            vecs.append(resp.embeddings[0].values)
+        return vecs
+
+    def embed_query(self, text: str) -> List[float]:
+        resp = _genai_client.models.embed_content(
+            model="models/text-embedding-004",
+            contents=text,
+            config=types.EmbedContentConfig(task_type="retrieval_query"),
+        )
+        return resp.embeddings[0].values
+
+    def __call__(self, text: str) -> List[float]:
+        """確保 Qdrant 調用時可當作 callable。"""
+        return self.embed_query(text)
+
+# --- ENV Qdrant Config ---
 QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 COLLECTION  = os.getenv("QDRANT_COLLECTION", "kfh_docs_gemini")

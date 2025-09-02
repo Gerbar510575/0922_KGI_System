@@ -78,7 +78,8 @@ def main():
             payload={"chunk": ch, "source": src}
         ))
     qc.upsert(collection_name=COLLECTION, points=points)
-    print(f"[OK] Indexed {len(points)} chunks → collection={COLLECTION}, dim={dim}")
+    print(f"[OK] Indexed {len(points)} chunks ??collection={COLLECTION}, dim={dim}")
 
 if __name__ == "__main__":
     main()
+

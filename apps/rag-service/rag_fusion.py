@@ -18,26 +18,12 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
 #from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-from .multi_query_rag import GeminiLLM
-from .retrieval_utils import (
+from multi_query_rag import GeminiLLM
+from retrieval_utils import (
     build_qdrant_retriever,
     build_chroma_retriever,
     reciprocal_rank_fusion,
 )
-
-# Vectorstores & Loaders
-#from langchain_community.vectorstores import Chroma
-#from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
-#from langchain_community.vectorstores import Qdrant as LCQdrant
-#from qdrant_client import QdrantClient
-
-# 從既有 multi_query_rag 重用 Gemini 封裝與環境常數
-#from .multi_query_rag import (
-    #GeminiLLM, GeminiEmbeddings,
-    #QDRANT_HOST, QDRANT_PORT, COLLECTION
-#)
-
-#load_dotenv()  # 僅為保險，確保 .env 已讀取
 
 
 # ===== 多視角查詢生成（RAG-Fusion 的「相關查詢」）=====

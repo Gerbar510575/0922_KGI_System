@@ -13,32 +13,16 @@ from operator import itemgetter
 
 # LangChain 基件
 try:
-    from langchain import hub  # 可無網路；拉取失敗會 fallback
+    from langchain import hub
     _HUB_OK = True
 except Exception:
     _HUB_OK = False
 
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-#from langchain_core.documents import Document
-#from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-# Vectorstores & loaders
-#from langchain_community.vectorstores import Chroma
-#from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
-#from langchain_community.vectorstores import Qdrant as LCQdrant
-#from qdrant_client import QdrantClient
-
-# 從 multi_query_rag 重用 Gemini 封裝與 Qdrant 連線常數
-#from .multi_query_rag import (
-    #GeminiLLM, GeminiEmbeddings,
-    #QDRANT_HOST, QDRANT_PORT, COLLECTION
-#)
-
-#load_dotenv()
-
-from .multi_query_rag import GeminiLLM
-from .retrieval_utils import (
+from multi_query_rag import GeminiLLM
+from retrieval_utils import (
     build_qdrant_retriever,
     build_chroma_retriever,
     join_docs,
@@ -143,4 +127,5 @@ def run_decompose_rag(
         qas, ctxs = answer_sub_questions_with_accumulated_qa(sub_questions=sub_questions, retriever=retriever, llm=llm, topn_ctx=topn_context_per_subq)
         final = synthesize_final_answer(llm, context_block=qas, main_question=question)
         return {"strategy": "accumulate", "final_answer": final, "sub_questions": sub_questions, "qa_pairs": qas, "contexts": ctxs, "backend": backend}
+
 

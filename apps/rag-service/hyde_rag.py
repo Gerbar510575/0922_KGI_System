@@ -11,33 +11,12 @@ HyDE (Hypothetical Document Embeddings) + RAG（完全使用 Gemini：生成 + E
 
 import os, bs4
 from typing import List, Dict, Any
-#from dotenv import load_dotenv
 
-# LangChain：文件/切片/提示/鏈
-#from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
-#from langchain.text_splitter import RecursiveCharacterTextSplitter
-#from langchain_core.documents import Document
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-# Vectorstores
-#from langchain_community.vectorstores import Chroma
-#from langchain_community.vectorstores import Qdrant as LCQdrant
-#from qdrant_client import QdrantClient
-
-# 從既有模組沿用 Gemini 封裝與 Qdrant 連線設定（皆以 google.genai 實作）
-#from .multi_query_rag import (
-    #GeminiLLM, GeminiEmbeddings,
-    #QDRANT_HOST, QDRANT_PORT, COLLECTION
-#)
-
-# 讀取 .env 並強制檢查金鑰（此模組必須使用 Gemini）
-#load_dotenv()
-#if not os.getenv("GENAI_API_KEY"):
-    #raise ValueError("請在 .env 設定 GENAI_API_KEY，且此模組要求必須使用 Gemini。")
-
-from .multi_query_rag import GeminiLLM
-from .retrieval_utils import (
+from multi_query_rag import GeminiLLM
+from retrieval_utils import (
     build_qdrant_retriever,
     build_chroma_retriever,
     collect_context_items,
@@ -87,4 +66,5 @@ def run_hyde_rag(
         "answer": answer,
         "contexts": collect_context_items(docs, top_k=ctx_topn),
     }
+
 
