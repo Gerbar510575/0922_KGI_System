@@ -1,0 +1,7 @@
+﻿code,name,category,fee,aum,currency,region,risk_level,esg,kgi
+KGI_US_EQ,凱基美國股票基金,equity_fund,0.012,1500000000,USD,US,中,Yes,Yes
+KGI_GLOBAL_EQ,凱基全球股票基金,equity_fund,0.013,1200000000,USD,Global,中,Yes,Yes
+KGI_IG_BOND,凱基投資等級債券基金,bond_fund,0.008,900000000,USD,Global,低,Yes,Yes
+KGI_EM_BOND,凱基新興市場債券基金,bond_fund,0.01,700000000,USD,EM,中,No,Yes
+KGI_BALANCED,凱基平衡型基金,balanced,0.01,800000000,USD,Global,中,Yes,Yes
+KGI_US_TREASURY,凱基美國公債基金,bond_fund,0.007,600000000,USD,US,低,No,Yes

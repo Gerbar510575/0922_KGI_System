@@ -1,0 +1,46 @@
+{
+  "KGI_US_EQ": [
+    "AAPL",
+    "MSFT",
+    "AMZN",
+    "GOOGL",
+    "NVDA",
+    "META",
+    "TSLA",
+    "AVGO",
+    "COST",
+    "PEP"
+  ],
+  "KGI_GLOBAL_EQ": [
+    "AAPL",
+    "MSFT",
+    "NOVN.SW",
+    "NESN.SW",
+    "TM",
+    "SAP",
+    "ASML",
+    "UNH",
+    "LVMH.PA",
+    "RIO.L"
+  ],
+  "KGI_IG_BOND": [
+    "LQD",
+    "IEF",
+    "HYG"
+  ],
+  "KGI_EM_BOND": [
+    "EMB",
+    "VWOB"
+  ],
+  "KGI_BALANCED": [
+    "VTI",
+    "BND",
+    "VXUS",
+    "BNDX"
+  ],
+  "KGI_US_TREASURY": [
+    "SHY",
+    "IEF",
+    "TLT"
+  ]
+}

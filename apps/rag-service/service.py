@@ -1,5 +1,6 @@
 # apps/rag-service/service.py
 from fastapi import FastAPI, Body, HTTPException
+from fastapi.responses import JSONResponse
 import os
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
@@ -36,6 +37,13 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 COLLECTION  = os.getenv("QDRANT_COLLECTION", "kfh_docs_gemini")
 
 app = FastAPI(title="RAG Service (Gemini)")
+
+@app.middleware("http")
+async def ensure_utf8(request, call_next):
+    response = await call_next(request)
+    if isinstance(response, JSONResponse):
+        response.headers["Content-Type"] = "application/json; charset=utf-8"
+    return response
 
 # ---------------- Embedding ----------------
 def embed_query(text: str):

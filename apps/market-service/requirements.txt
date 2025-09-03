@@ -3,3 +3,4 @@ uvicorn==0.30.6
 redis==5.0.8
 pandas==2.2.2
 yahoo_fin==0.8.9.1
+requests_html==0.10.0

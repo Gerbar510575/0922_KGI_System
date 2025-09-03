@@ -100,6 +100,25 @@ services:
     ports:
       - "8501:8501"
 
+  tests:
+    build:
+      context: ..
+      dockerfile: infra/docker/rag-service/Dockerfile
+    container_name: tests
+    volumes:
+      - ../apps:/app
+      - ../tests:/tests
+      - ../.env:/app/.env:ro
+    working_dir: /tests
+    command: ["pytest", "-v", "--maxfail=1", "--disable-warnings"]
+    depends_on:
+      - rag
+      - gateway
+      - advisor
+      - report
+      - market
+
+
 volumes:
   qdrant_data:
 
