@@ -1,9 +1,10 @@
-# apps/market-service/service.py
 from fastapi import FastAPI
 from typing import List, Dict, Any
 import os, json, time, datetime
 import pandas as pd
 import redis
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # --- Yahoo Finance -----------------------------------------------------------
 YF_OK = True
@@ -200,6 +201,7 @@ def heat(payload: dict):
       { "source": "...", "data": { "TICKER": {"rel_volume_score": <float>} } }
     """
     tickers: List[str] = payload.get("tickers", [])
+    logging.info(f"[heat] input tickers={tickers}")
     key = f"heat:{','.join(sorted(tickers))}"
     cached = cache_get(key)
     if cached:
@@ -246,6 +248,11 @@ def heat(payload: dict):
                         scores[t] = {"rel_volume_score": score}
 
     cache_set(key, scores)
+    if live_ok:
+        logging.info(f"[heat] live computed scores={scores}")
+    else:
+        logging.info(f"[heat] fallback scores={scores}")
+
     return {"source": "live" if live_ok else "backup", "data": scores}
 
 # === 新增：讀入基金持股對照（fund_code -> [tickers]） ==========================
@@ -266,17 +273,21 @@ def fund_heat(payload: dict):
     回傳: {"source":"live|backup|mixed","data":{"KGI_US_EQ":{"rel_volume_score":0.42,"coverage":18,"missing":["..."]}}}
     """
     fund_codes: List[str] = payload.get("fund_codes", [])
+    logging.info(f"[fund_heat] fund_codes={fund_codes}")
     if not fund_codes:
         return {"source": "mixed", "data": {}}
 
     holdings_map = load_holdings_map()  # fund_code -> [tickers]
+    logging.info(f"[fund_heat] holdings_map keys={list(holdings_map.keys())[:5]}")
     # 收集所有需要的股票
     all_tickers = sorted({t for fc in fund_codes for t in holdings_map.get(fc, [])})
+    logging.info(f"[fund_heat] all_tickers={all_tickers}")
     if not all_tickers:
         return {"source": "mixed", "data": {fc: {"rel_volume_score": 0.0, "coverage": 0, "missing": []} for fc in fund_codes}}
 
     # 直接重用你現有的邏輯，拿到個股的 heat
     heat_resp = heat({"tickers": all_tickers})
+    logging.info(f"[fund_heat] per_ticker={heat_resp}")
     per_ticker = heat_resp.get("data", {})
     source = heat_resp.get("source", "mixed")
 
@@ -294,5 +305,5 @@ def fund_heat(payload: dict):
                 scores.append(float(s))
         agg = float(sum(scores)/len(scores)) if scores else 0.0
         result[fc] = {"rel_volume_score": agg, "coverage": len(scores), "missing": missing}
-
+    logging.info(f"[fund_heat] result={result}")
     return {"source": source, "data": result}

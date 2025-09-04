@@ -1,6 +1,20 @@
 version: "3.9"
 
 services:
+  
+  ml-bridge:
+    build:
+      context: ..
+      dockerfile: infra/docker/ml-bridge/Dockerfile
+    container_name: ml-bridge
+    environment:
+      MLBRIDGE_CONFIG: /app/config/models.yaml
+      SUBPROC_TIMEOUT: 15
+    volumes:
+      - ../apps/ml-bridge:/app
+    ports:
+      - "7000:7000"
+  
   qdrant:
     image: qdrant/qdrant:v1.10.0
     container_name: qdrant
@@ -21,7 +35,7 @@ services:
       dockerfile: infra/docker/rag-service/Dockerfile
     container_name: rag
     env_file:
-      - ../.env                 # 從根目錄載入 .env -> 變成容器環境變數
+      - ../.env
     environment:
       QDRANT_HOST: qdrant
       QDRANT_PORT: "6333"
@@ -30,7 +44,7 @@ services:
     volumes:
       - ../apps/rag-service:/app
       - ../configs:/configs:ro
-      - ../.env:/app/.env:ro    # 讓 load_dotenv() 也能在容器內讀到同一份 .env
+      - ../.env:/app/.env:ro
     depends_on:
       - qdrant
     ports:
@@ -43,10 +57,14 @@ services:
     container_name: gateway
     environment:
       RAG_URL: http://rag:8002
+      ADVISOR_URL: http://advisor:8003   # <── 新增
+      REPORT_URL: http://report:8004     # <── 新增
     volumes:
       - ../apps/gateway:/app
     depends_on:
       - rag
+      - advisor
+      - report
     ports:
       - "8000:8000"
 
@@ -55,8 +73,14 @@ services:
       context: ..
       dockerfile: infra/docker/advisor-service/Dockerfile
     container_name: advisor
+    environment:
+      MKT_URL: http://market:8005        # <── 新增
+      ML_BRIDGE_URL: http://ml-bridge:7000
     volumes:
       - ../apps/advisor-service:/app
+    depends_on:
+      - market
+      - ml-bridge
     ports:
       - "8003:8003"
 
@@ -93,8 +117,10 @@ services:
     container_name: ui
     environment:
       GATEWAY_URL: http://gateway:8000
+      TRAIN_CSV_PATH: /app/data/train.csv
     volumes:
       - ../apps/ui:/app
+      - ../apps/ui/data:/app/data:ro
     depends_on:
       - gateway
     ports:
@@ -117,7 +143,6 @@ services:
       - advisor
       - report
       - market
-
 
 volumes:
   qdrant_data:

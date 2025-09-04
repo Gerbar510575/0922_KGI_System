@@ -12,8 +12,8 @@ RPT = os.getenv("RPT_URL", "http://report:8004")
 
 app = FastAPI(title="KFH Advisor Gateway")
 
-app.include_router(rag.router)
-# app.include_router(auto_rag.router)
+#app.include_router(rag.router)
+#app.include_router(auto_rag.router)
 
 @app.get("/health")
 def health():
@@ -66,7 +66,7 @@ async def justify(payload: dict):
 @app.post("/report")
 async def report(payload: dict):
     async with httpx.AsyncClient(timeout=60) as c:
-        r = await c.post(f"{RPT}/generate", json=payload)
+        r = await c.post(f"{RPT}/report", json=payload)
     return r.json()
 
 

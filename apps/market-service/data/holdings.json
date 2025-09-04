@@ -1,46 +1,194 @@
 {
-  "KGI_US_EQ": [
+  "G006_TWD": [
+    "MSFT",
+    "NVDA",
+    "TSM",
+    "AVGO",
+    "META",
+    "NOW",
     "AAPL",
+    "ANET",
+    "GOOGL",
+    "000660.KQ"
+  ],
+  "G006_USD": [
+    "MSFT",
+    "NVDA",
+    "TSM",
+    "AVGO",
+    "META",
+    "NOW",
+    "AAPL",
+    "ANET",
+    "GOOGL",
+    "000660.KQ"
+  ],
+  "G006_RMB": [
+    "MSFT",
+    "NVDA",
+    "TSM",
+    "AVGO",
+    "META",
+    "NOW",
+    "AAPL",
+    "ANET",
+    "GOOGL",
+    "000660.KQ"
+  ],
+  "G006_ZAR": [
+    "MSFT",
+    "NVDA",
+    "TSM",
+    "AVGO",
+    "META",
+    "NOW",
+    "AAPL",
+    "ANET",
+    "GOOGL",
+    "000660.KQ"
+  ],
+  "G011_TWD": [
+    "BSX",
+    "SYK",
+    "ABT",
+    "WELL",
+    "ISRG",
+    "LLY",
+    "MCK",
+    "MDT",
+    "CVS",
+    "COR"
+  ],
+  "G011_USD": [
+    "BSX",
+    "SYK",
+    "ABT",
+    "WELL",
+    "ISRG",
+    "LLY",
+    "MCK",
+    "MDT",
+    "CVS",
+    "COR"
+  ],
+  "G011_RMB": [
+    "BSX",
+    "SYK",
+    "ABT",
+    "WELL",
+    "ISRG",
+    "LLY",
+    "MCK",
+    "MDT",
+    "CVS",
+    "COR"
+  ],
+  "G011_ZAR": [
+    "BSX",
+    "SYK",
+    "ABT",
+    "WELL",
+    "ISRG",
+    "LLY",
+    "MCK",
+    "MDT",
+    "CVS",
+    "COR"
+  ],
+  "G012_TWD": [
+    "NVDA",
     "MSFT",
     "AMZN",
+    "TSM",
     "GOOGL",
-    "NVDA",
-    "META",
-    "TSLA",
+    "SNPS",
+    "CLH",
     "AVGO",
-    "COST",
-    "PEP"
+    "COHR",
+    "MELI"
   ],
-  "KGI_GLOBAL_EQ": [
-    "AAPL",
+  "G012_USD": [
+    "NVDA",
     "MSFT",
-    "NOVN.SW",
-    "NESN.SW",
-    "TM",
-    "SAP",
-    "ASML",
-    "UNH",
-    "LVMH.PA",
-    "RIO.L"
+    "AMZN",
+    "TSM",
+    "GOOGL",
+    "SNPS",
+    "CLH",
+    "AVGO",
+    "COHR",
+    "MELI"
   ],
-  "KGI_IG_BOND": [
-    "LQD",
-    "IEF",
-    "HYG"
+  "G012_RMB": [
+    "NVDA",
+    "MSFT",
+    "AMZN",
+    "TSM",
+    "GOOGL",
+    "SNPS",
+    "CLH",
+    "AVGO",
+    "COHR",
+    "MELI"
   ],
-  "KGI_EM_BOND": [
-    "EMB",
-    "VWOB"
+  "G012_ZAR": [
+    "NVDA",
+    "MSFT",
+    "AMZN",
+    "TSM",
+    "GOOGL",
+    "SNPS",
+    "CLH",
+    "AVGO",
+    "COHR",
+    "MELI"
   ],
-  "KGI_BALANCED": [
-    "VTI",
-    "BND",
-    "VXUS",
-    "BNDX"
+  "G013_TWD": [
+    "TSM",
+    "AVGO",
+    "NVDA",
+    "TXN",
+    "TEL",
+    "MSFT",
+    "IFX",
+    "TSLA",
+    "HEI",
+    "TDK"
   ],
-  "KGI_US_TREASURY": [
-    "SHY",
-    "IEF",
-    "TLT"
+  "G013_USD": [
+    "TSM",
+    "AVGO",
+    "NVDA",
+    "TXN",
+    "TEL",
+    "MSFT",
+    "IFX",
+    "TSLA",
+    "HEI",
+    "TDK"
+  ],
+  "G013_RMB": [
+    "TSM",
+    "AVGO",
+    "NVDA",
+    "TXN",
+    "TEL",
+    "MSFT",
+    "IFX",
+    "TSLA",
+    "HEI",
+    "TDK"
+  ],
+  "G013_ZAR": [
+    "TSM",
+    "AVGO",
+    "NVDA",
+    "TXN",
+    "TEL",
+    "MSFT",
+    "IFX",
+    "TSLA",
+    "HEI",
+    "TDK"
   ]
 }

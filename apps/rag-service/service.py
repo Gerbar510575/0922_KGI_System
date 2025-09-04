@@ -1,7 +1,7 @@
 # apps/rag-service/service.py
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.responses import JSONResponse
-import os
+import os, re, time
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 
@@ -64,7 +64,7 @@ def _baseline_answer(question: str, backend: str = "qdrant", topk: int = 3) -> d
     try:
         retr = build_qdrant_retriever(top_k=topk)
         docs = retr.invoke(question)
-    except Exception as e:
+    except Exception:
         docs = []
         context_txt = ""
     else:
@@ -92,75 +92,100 @@ def _baseline_answer(question: str, backend: str = "qdrant", topk: int = 3) -> d
         "meta": {"note": "baseline fallback"},
     }
 
-# ---------------- Strategies ----------------
-def _exec_strategy(strategy: str, payload: dict) -> dict:
-    """封裝不同策略的呼叫，出錯會 raise，交給上層 fallback"""
-    q = payload.get("query", "")
-    backend  = payload.get("backend", "qdrant")
-    topk     = int(payload.get("topk", 3))
-    ctx_topn = int(payload.get("ctx_topn", 6))
+# ---------------- Heuristics ----------------
+DEF_PATTERNS = [
+    r"什麼是", r"是什麼", r"定義", r"meaning", r"what\s+is\b", r"define\b", r"概念"
+]
+MULTI_PATTERNS = [
+    r"比較", r"差異", r"\bvs\.?\b", r"優缺點", r"pros", r"cons",
+    r"步驟", r"流程", r"策略", r"框架", r"如何", r"how\s+to\b"
+]
 
-    if strategy == "multi_query":
-        return run_multi_query_rag(q, backend=backend, topk=topk, ctx_topn=ctx_topn)
-    elif strategy == "rag_fusion":
-        return run_rag_fusion(q, backend=backend, top_k=topk, top_n_context=ctx_topn)
-    elif strategy == "step_back":
-        return run_step_back_rag(q, backend=backend, topk_normal=topk, topk_step=topk)
-    elif strategy == "hyde":
-        return run_hyde_rag(q, backend=backend, topk=topk, ctx_topn=ctx_topn)
-    elif strategy == "decompose":
-        return run_decompose_rag(
-            q, backend=backend, top_k=topk,
-            strategy="accumulate", topn_context_per_subq=min(ctx_topn, 4)
-        )
-    else:
-        raise HTTPException(status_code=400, detail=f"unknown strategy: {strategy}")
+def is_definition_like(q: str) -> bool:
+    q = q.lower().strip()
+    if len(q) <= 12:
+        return True
+    return any(re.search(p, q) for p in DEF_PATTERNS)
 
-def _auto_select_strategy(q: str) -> str:
-    ql = q.strip()
-    low = ql.lower()
-    if len(ql) > 48 or any(k in ql for k in ["、", "；", "以及", "與", "與否"]):
-        return "rag_fusion"
-    if any(k in low for k in ["why", "風險", "來源", "risk", "原因"]):
-        return "step_back"
-    if any(k in low for k in ["what is", "是什麼", "定義", "explain", "解釋"]):
-        return "hyde"
-    return "multi_query"
+def is_multifaceted(q: str) -> bool:
+    q = q.lower().strip()
+    return any(re.search(p, q) for p in MULTI_PATTERNS)
 
 # ---------------- Routes ----------------
 @app.post("/auto")
 def rag_auto(payload: dict = Body(...)):
-    q = payload.get("query", "")
+    q = (payload.get("query") or "").strip()
     if not q:
         raise HTTPException(status_code=400, detail="query is required")
 
-    chosen = payload.get("strategy") or _auto_select_strategy(q)
+    backend = payload.get("backend", "qdrant")
+    topk = int(payload.get("topk", 3))
+    ctx_topn = int(payload.get("ctx_topn", 6))
+    strategy = payload.get("strategy", "parallel")
 
-    # 先試選定策略
+    t0 = time.time()
+
+    # Step1: 初步 search
     try:
-        result = _exec_strategy(chosen, payload)
-        result.setdefault("route_used", chosen)
-        result.setdefault("backend", payload.get("backend", "qdrant"))
-        return result
+        retr = build_qdrant_retriever(top_k=max(3, topk))
+        docs = retr.invoke(q)
+        contexts = collect_context_items(docs, top_k=max(3, ctx_topn))
+        top_score = max([c.get("score", 0.0) for c in contexts], default=0.0)
     except Exception as e:
-        pass
+        raise HTTPException(502, f"RAG /search failed: {e}")
 
-    # 預設 fallback 順序
-    for name in ["multi_query", "rag_fusion", "hyde", "step_back", "decompose"]:
-        try:
-            result = _exec_strategy(name, payload)
-            result.setdefault("route_used", name)
-            result.setdefault("backend", payload.get("backend", "qdrant"))
-            return result
-        except Exception:
-            continue
+    decision_reason = f"top_score={top_score:.2f}, hits={len(contexts)}"
 
-    # 全部失敗 → baseline
-    return _baseline_answer(
-        question=q,
-        backend=payload.get("backend", "qdrant"),
-        topk=int(payload.get("topk", 3))
-    )
+    # Step2: Heuristics 選擇策略
+    if top_score >= 0.55 and len(contexts) >= 2:
+        chosen = "search"
+        decision_reason += " → route=search"
+    elif 0.35 <= top_score < 0.55:
+        chosen = "multi_query"
+        decision_reason += " → route=multi_query"
+    else:
+        if is_definition_like(q):
+            chosen = "hyde"
+            decision_reason += " → route=hyde (definition-like)"
+        elif is_multifaceted(q):
+            chosen = "decompose_parallel" if strategy == "parallel" else "decompose_accumulate"
+            decision_reason += f" → route={chosen} (multifaceted)"
+        else:
+            chosen = "step_back"
+            decision_reason += " → route=step_back (short/ambiguous)"
+
+    # Step3: 執行策略
+    if chosen == "search":
+        result = {
+            "route_used": "search",
+            "backend": backend,
+            "answer": None,
+            "contexts": contexts[:ctx_topn],
+            "meta": {"top_score": top_score, "decision": decision_reason,
+                     "latency_ms": int((time.time()-t0)*1000)},
+        }
+        return result
+
+    elif chosen == "multi_query":
+        result = run_multi_query_rag(q, backend=backend, topk=topk, ctx_topn=ctx_topn)
+    elif chosen.startswith("decompose"):
+        result = run_decompose_rag(q, backend=backend, top_k=topk,
+                                   strategy="parallel" if chosen.endswith("parallel") else "accumulate",
+                                   topn_context_per_subq=min(ctx_topn, 4))
+    elif chosen == "step_back":
+        result = run_step_back_rag(q, backend=backend, topk_normal=topk, topk_step=topk)
+    elif chosen == "hyde":
+        result = run_hyde_rag(q, backend=backend, topk=topk, ctx_topn=ctx_topn)
+    else:
+        return _baseline_answer(q, backend=backend, topk=topk)
+
+    # Step4: 補上 meta
+    result.setdefault("route_used", chosen)
+    result.setdefault("backend", backend)
+    result.setdefault("meta", {})["decision"] = decision_reason
+    result["meta"]["latency_ms"] = int((time.time()-t0)*1000)
+
+    return result
 
 @app.post("/search")
 def search(payload: dict):
@@ -180,3 +205,4 @@ def search(payload: dict):
             for h in res
         ],
     }
+

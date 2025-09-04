@@ -8,7 +8,9 @@
 ---
 
 ## 一、建議基金配置
+{% if charts.alloc_pie %}
 ![配置圖]({{ charts.alloc_pie }})
+{% endif %}
 
 {% for k,v in advice.target_allocation.items() -%}
 - {{ k }}：**{{ (v*100)|round(0) }}%**
@@ -20,7 +22,7 @@
 | 基金名稱 | 分類 | 建議比重 | 費用率 | 幣別 | 區域 | 熱度分數 | 說明 |
 |---|---|---:|---:|:---:|:---:|---:|---|
 {% for p in advice.picks -%}
-| {{ p.name }} ({{ p.code }}) | {{ p.category }} | {{ (p.weight*100)|round(1) }}% | {{ p.fee }} | {{ p.currency }} | {{ p.region }} | {{ p.heat|default(0)|round(2) }} | AUM: {{ p.aum }} |
+| {{ p.name }} ({{ p.code }}) | {{ p.category }} | {{ (p.weight*100)|round(1) }}% | {{ p.fee }} | {{ p.currency }} | {{ p.region }} | {{ p.get("heat",0)|round(2) }} | AUM: {{ p.aum }} |
 {% endfor %}
 
 {% if advice.suitability_flags %}
@@ -51,4 +53,5 @@
 本報告為投資建議示範，僅供參考。  
 基金投資有風險，過去績效不代表未來表現。  
 建議搭配完整 KYC 與專業理財顧問諮詢。
+
 

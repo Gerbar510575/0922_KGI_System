@@ -1,7 +1,7 @@
 import streamlit as st, pandas as pd, requests, os
 
 GATE = os.getenv("GATEWAY_URL","http://localhost:8000")
-CSV_PATH = os.getenv("TRAIN_CSV_PATH", "train - 複製.csv")
+CSV_PATH = os.getenv("TRAIN_CSV_PATH", "train.csv")
 
 df = pd.read_csv(CSV_PATH)
 
@@ -21,6 +21,7 @@ tab1, tab2, tab3 = st.tabs(["填寫屬性", "建議與引用", "生成報告"])
 # --- Tab1: KYC 表單 ---
 with tab1:
     with st.form("kyc_form"):
+        name = st.text_input("姓名", "王小明")
         gender = st.selectbox("Gender", gender_opts)
         married = st.selectbox("Married", married_opts)
         dependents = st.selectbox("Dependents", dependents_opts)
@@ -29,11 +30,14 @@ with tab1:
         property_area = st.selectbox("Property Area", property_opts)
         applicant_income = st.number_input("Applicant Income", min_value=0)
         coapplicant_income = st.number_input("Coapplicant Income", min_value=0)
+        goal = st.selectbox("投資目標", ["退休","教育","增長"], index=0)
+        horizon = st.number_input("投資期限（年）", 1, 30, 5)
         prefs = st.multiselect("偏好", ["低費用","ESG","美元資產"], default=["低費用"])
         submit = st.form_submit_button("取得建議")
 
     if submit:
-        payload = {"kyc": {
+        client = {
+            "name": name,
             "Gender": gender,
             "Married": married,
             "Dependents": dependents,
@@ -42,9 +46,12 @@ with tab1:
             "Property_Area": property_area,
             "ApplicantIncome": applicant_income,
             "CoapplicantIncome": coapplicant_income,
-            "preferences": prefs
-        }}
-        st.session_state["client"] = payload["kyc"]
+            "goal": goal,
+            "horizon_years": horizon,
+            "preferences": prefs,
+        }
+        payload = {"kyc": client}
+        st.session_state["client"] = client
         st.session_state["advice"] = requests.post(f"{GATE}/advise", json=payload, timeout=60).json()
         st.success("✅ 已生成建議，請切換到『建議與引用』")
 
@@ -57,7 +64,7 @@ with tab2:
         st.subheader("輸入您的問題")
         question = st.text_input("例如：基金的收益來源與風險揭露？")
         if st.button("取得引用"):
-            query = "；".join([p.get("name") for p in st.session_state["advice"].get("picks", []) if "name" in p]) + " " + question
+            query = "；".join([p.get("name","") for p in st.session_state["advice"].get("picks", [])]) + " " + question
             st.session_state["refs"] = requests.post(f"{GATE}/rag/fusion", json={
                 "query": query, "backend": "qdrant", "topk": 3, "topn_context": 6
             }, timeout=90).json()
@@ -68,7 +75,9 @@ with tab3:
     if "advice" in st.session_state and "refs" in st.session_state:
         payload = {"client": st.session_state["client"], "advice": st.session_state["advice"], "refs": st.session_state["refs"]}
         r = requests.post(f"{GATE}/report", json=payload, timeout=90).json()
-        st.download_button("下載 Markdown", data=r["markdown"], file_name="investment_report.md")
+        fname = f"{st.session_state['client']['name']}_投資建議報告.md"
+        st.download_button("下載 Markdown", data=r["markdown"], file_name=fname)
         st.components.v1.html(r["html"], height=700, scrolling=True)
+
 
 

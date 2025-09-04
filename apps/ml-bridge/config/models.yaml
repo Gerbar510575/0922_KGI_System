@@ -1,0 +1,18 @@
+models:
+  # R 模型：以 Rscript 執行，讀取 stdin 的 JSON，輸出 JSON
+  risk_r:
+    engine: r
+    workdir: /app/models/r
+    cmd: ["Rscript", "predict.R"]
+
+  # Java 模型：jar 主程式從 stdin 讀 JSON、stdout 回 JSON
+  risk_java:
+    engine: java
+    workdir: /app/models/java
+    cmd: ["java", "-jar", "risk-model.jar"]
+
+  # C++ 可執行檔：從 stdin 讀 JSON、stdout 回 JSON
+  risk_cpp:
+    engine: cpp
+    workdir: /app/models/cpp
+    cmd: ["./predict"]
