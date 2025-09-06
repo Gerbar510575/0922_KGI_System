@@ -101,16 +101,12 @@ def build_final_rag_chain(retriever, llm: GeminiLLM):
     return final_chain, retrieval_chain
 
 # ===== 對外主入口 =====
-def run_multi_query_rag(
-    question: str,
-    backend: str = "qdrant",    # "qdrant" | "chroma"
-    top_k: int = 3,
-    urls: List[str] | None = None,
-    model: str = "models/gemini-2.5-flash",
-    temperature: float = 0.0,
-) -> Dict[str, Any]:
+def run_multi_query_rag(..., doc_type: str | None = None) -> Dict[str, Any]:
     llm = GeminiLLM(model=model, temperature=temperature)
-    retriever = build_qdrant_retriever(top_k=top_k) if backend == "qdrant" else build_chroma_retriever(urls=urls, top_k=top_k)
+    retriever = (
+        build_qdrant_retriever(top_k=top_k, doc_type=doc_type)
+        if backend == "qdrant" else build_chroma_retriever(urls=urls, top_k=top_k)
+    )
     final_chain, retrieval_chain = build_final_rag_chain(retriever, llm)
 
     docs: List[Document] = retrieval_chain.invoke({"question": question})

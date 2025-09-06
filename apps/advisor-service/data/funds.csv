@@ -1,13 +1,5 @@
-code,name,category,fee,aum,currency,region,risk_level,esg,kgi,manager,inception
-G006_TWD,凱基雲端趨勢基金,equity_fund,0.015,512920000,TWD,Global,RR4,Yes,Yes,馮紹榮,2012-09-13
-G006_USD,凱基雲端趨勢基金,equity_fund,0.015,512920000,USD,Global,RR4,Yes,Yes,馮紹榮,2012-09-13
-G011_TWD,凱基醫院及長照產業基金,equity_fund,0.014,301560000,TWD,Global,RR3,Yes,Yes,黃廷偉,2017-05-02
-G011_USD,凱基醫院及長照產業基金,equity_fund,0.014,301560000,USD,Global,RR3,Yes,Yes,黃廷偉,2017-05-02
-G011_CNY,凱基醫院及長照產業基金,equity_fund,0.014,301560000,CNY,Global,RR3,Yes,Yes,黃廷偉,2017-05-02
-G012_TWD,凱基環球趨勢基金,equity_fund,0.013,600040000,TWD,Global,RR3,Yes,Yes,黃廷偉,2021-05-03
-G012_USD,凱基環球趨勢基金,equity_fund,0.013,600040000,USD,Global,RR3,Yes,Yes,黃廷偉,2021-05-03
-G012_CNY,凱基環球趨勢基金,equity_fund,0.013,600040000,CNY,Global,RR3,Yes,Yes,黃廷偉,2021-05-03
-G013_TWD,凱基未來移動基金,equity_fund,0.013,503350000,TWD,Global,RR4,Yes,Yes,馮紹榮,2022-03-10
-G013_USD,凱基未來移動基金,equity_fund,0.013,503350000,USD,Global,RR4,Yes,Yes,馮紹榮,2022-03-10
-G013_CNY,凱基未來移動基金,equity_fund,0.013,503350000,CNY,Global,RR4,Yes,Yes,馮紹榮,2022-03-10
-G013_ZAR,凱基未來移動基金,equity_fund,0.013,503350000,ZAR,Global,RR4,Yes,Yes,馮紹榮,2022-03-10
+﻿name,code,inception,category,fee,currency,aum (NTD million),manager,risk_level,Top ten holdings,Industry allocation,Country allocation
+凱基雲端趨勢基金,G006,2012/9/13,股票型,0.015,"TWD,USD",512.92,馮紹榮,RR4,"Microsoft 8.40%, NVIDIA 6.85%, 台積電 6.81%, Broadcom 5.31%, Meta 3.83%, ServiceNow 3.69%, Apple 3.63%, Arista 3.45%, Alphabet 3.31%, SK Hynix 3.09%","半導體 33.55%, 軟體 29.39%, 硬體 9.41%, 媒體 8.50%, ETF 6.07%","美國 77.13%, 臺灣 10.75%, 韓國 3.09%, 德國 2.88%"
+凱基醫院及長照產業基金,G011,2017/5/2,股票型,0.014,"TWD,USD,CNY",301.56,黃廷偉,RR3,"Boston Scientific 8.65%, Stryker 8.57%, Abbott 7.64%, Welltower 5.93%, Intuitive Surgical 5.92%, Eli Lilly 4.85%, McKesson 4.69%, Medtronic 4.37%, CVS 3.62%, Cencora 3.58%","醫療服務 82.75%, 製藥生技 7.82%, REITs 4.37%, 保險 2.53%","美國 64.93%, 愛爾蘭 14.80%, 荷蘭 5.93%, 中國 3.15%, 瑞士 1.90%"
+凱基環球趨勢基金,G012,2021/5/3,股票型,0.013,"TWD,USD,CNY",600.04,黃廷偉,RR3,"NVIDIA 7.68%, Microsoft 7.39%, Amazon 5.33%, TSMC-ADR 4.31%, Alphabet 4.27%, Synopsys 3.95%, Clean Harbors 3.89%, Broadcom 3.16%, Coherent 3.15%, MercadoLibre 3.08%","資訊技術 37.30%, 非核心消費 22.86%, 醫療保健 9.21%, 通訊服務 8.59%, 工業 6.63%","美國 68.88%, 中國 4.78%, 荷蘭 4.64%, 臺灣 4.31%, 烏拉圭 3.08%"
+凱基未來移動基金,G013,2022/3/10,股票型,0.013,"TWD,USD,CNY,ZAR",503.35,馮紹榮,RR4,"台積電 6.91%, Broadcom 6.63%, NVIDIA 5.92%, Texas Instruments 5.17%, TE Connectivity 5.14%, Microsoft 4.44%, Infineon 3.88%, Tesla 3.85%, HEICO 3.69%, TDK 3.48%","資訊技術 56.74%, 工業 13.87%, 非核心消費 11.44%, ETF 7.41%","美國 56.80%, 臺灣 11.45%, 中國 5.89%, 日本 5.77%, 愛爾蘭 5.14%"

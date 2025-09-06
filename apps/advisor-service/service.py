@@ -1,16 +1,17 @@
-from fastapi import FastAPI
-import pandas as pd, requests, os
+from fastapi import FastAPI, HTTPException
+import pandas as pd, requests, os, json
 from typing import Dict, Any, List
+import statsmodels.api as sm
+import numpy as np
 
 app = FastAPI(title="Advisor Service")
 
 # === 檔案路徑 ===
 FUNDS_PATH = "data/funds.csv"
-#MODEL_PATH = "models/risk_model.pkl"
+HOLDINGS_PATH = "data/holdings.json"
 
 # === 載入資料 ===
 funds = pd.read_csv(FUNDS_PATH)
-#clf = joblib.load(MODEL_PATH)
 
 MKT = os.getenv("MKT_URL", "http://market:8005")
 MLB = os.getenv("ML_BRIDGE_URL", "http://ml-bridge:7000")  # ML Bridge
@@ -53,83 +54,136 @@ def infer_risk_via_bridge(kyc: Dict[str, Any]) -> str:
 
     return "穩健"
 
-# === 配置規則 ===
-def target_by_risk(risk: str) -> Dict[str, float]:
-    if risk == "積極":
-        return {"equity_fund": 0.75, "bond_fund": 0.20, "cash": 0.05}
-    if risk == "穩健":
-        return {"equity_fund": 0.45, "bond_fund": 0.45, "cash": 0.10}
-    return {"equity_fund": 0.25, "bond_fund": 0.65, "cash": 0.10}
-
-# === 核心：挑選基金 ===
-def pick_funds(
-    funds_df: pd.DataFrame,
-    target: Dict[str, float],
-    prefs: List[str],
-    fund_heat: Dict[str, Any],
-    topn=2
-):
-    picks = []
-    # 僅挑選凱基自家基金
-    base = funds_df[funds_df["kgi"].astype(str).str.lower().isin(["yes", "true", "1"])]
-
-    for cat, w in target.items():
-        subgroup = base[base["category"] == cat].copy()
-        if subgroup.empty or w <= 0:
-            continue
-
-        # 加上熱度分數
-        subgroup["heat"] = subgroup["code"].map(
-            lambda c: fund_heat.get(c, {}).get("rel_volume_score", 0.0)
+# === 工具：抓每日報酬 (需自行串接 market-service) ===
+def get_daily_returns(tickers: List[str]) -> pd.DataFrame:
+    try:
+        resp = requests.post(
+            f"{MKT}/history",
+            json={"tickers": tickers, "days": 180},
+            timeout=30
         )
+        resp.raise_for_status()
+        data = resp.json().get("data", {})
+        frames = []
+        for t, rows in data.items():
+            df = pd.DataFrame(rows)
+            if "date" in df.columns and "close" in df.columns and not df.empty:
+                df["date"] = pd.to_datetime(df["date"])
+                df = df.sort_values("date")
+                df = df.set_index("date")
+                df[t] = df["close"].pct_change()
+                frames.append(df[[t]])
+        if frames:
+            return pd.concat(frames, axis=1).dropna()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"get_daily_returns failed: {e}")
+    return pd.DataFrame()
 
-        # 排序：費用低 > AUM 大 > 熱度高
-        subgroup = subgroup.sort_values(by=["fee", "aum", "heat"], ascending=[True, False, False])
-        top = subgroup.head(topn)
 
-        if len(top) == 0:
-            picks.append({"category": cat, "note": "此類別無可用基金"})
-            continue
+# === 計算個股 beta ===
+def compute_stock_betas(daily_return: pd.DataFrame) -> dict:
+    market_returns = daily_return.mean(axis=1)
+    excess_market = market_returns - (0.02/252)
+    betas = {}
+    for ticker in daily_return.columns:
+        y = daily_return[ticker] - (0.02/252)
+        X = sm.add_constant(excess_market)
+        try:
+            model = sm.OLS(y, X).fit()
+            betas[ticker] = float(model.params[1]) if len(model.params) > 1 else 0.0
+        except Exception:
+            betas[ticker] = 0.0
+    return betas
 
-        picks += top.assign(weight=w/len(top)).to_dict("records")
-
-    return picks
+# === 計算基金 beta (持股加權平均) ===
+def compute_fund_betas(holdings_map: dict, stock_betas: dict) -> dict:
+    fund_betas = {}
+    for fc, comps in holdings_map.items():
+        weights = np.array(list(comps.values()))
+        weights = weights / weights.sum()
+        tickers = list(comps.keys())
+        bvals = [stock_betas.get(t, 0.0) for t in tickers]
+        fund_betas[fc] = float(np.dot(weights, bvals))
+    return fund_betas
 
 # === API ===
 @app.post("/advise")
 def advise(payload: dict):
     kyc = payload.get("kyc", {})
+    beta_pref = kyc.get("beta_pref", [0.8, 1.2])  # 使用者 Beta 偏好範圍
 
-    # 1) 透過 ML Bridge + 外部語言模型推斷風險
+    # Step 1: 模型推斷風險屬性
     inferred = infer_risk_via_bridge(kyc)
 
-    # 2) 配置目標
-    target = target_by_risk(inferred)
+    # Step 2: 定義風險屬性對應合理 Beta 區間
+    risk_beta_ranges = {
+        "保守": (0.0, 0.9),
+        "穩健": (0.9, 1.2),
+        "積極": (1.2, 3.0)
+    }
+    expected_range = risk_beta_ranges.get(inferred, (0.9, 1.2))
 
-    # 3) 聚合基金熱度
-    fund_codes = funds["code"].tolist()
-    resp = requests.post(
-        f"{MKT}/fund_heat",
-        json={"fund_codes": fund_codes},
-        timeout=20
-    )
-    fund_heat = resp.json().get("data", {}) if resp.status_code == 200 else {}
+    # Step 3: 載入 holdings & 日報酬
+    holdings_map = json.load(open(HOLDINGS_PATH, "r", encoding="utf-8"))
+    tickers = list({t for fc in holdings_map for t in holdings_map[fc]})
+    try:
+        daily_return = get_daily_returns(tickers)
+    except NotImplementedError:
+        raise HTTPException(status_code=500, detail="尚未實作 get_daily_returns()")
 
-    # 4) 挑基金
-    picks = pick_funds(funds, target, kyc.get("preferences", []), fund_heat, topn=2)
+    # Step 4: 計算股票 beta 與基金 beta
+    stock_betas = compute_stock_betas(daily_return)
+    fund_betas = compute_fund_betas(holdings_map, stock_betas)
 
+    # Step 5: 挑選符合 Beta 偏好的基金
+    selected_fund, selected_beta = None, None
+    for fc, b in fund_betas.items():
+        if beta_pref[0] <= b <= beta_pref[1]:
+            if selected_beta is None or abs(b - np.mean(beta_pref)) < abs(selected_beta - np.mean(beta_pref)):
+                selected_fund, selected_beta = fc, b
+
+    if not selected_fund:
+        raise HTTPException(status_code=404, detail="沒有基金符合指定的 Beta 區間")
+
+    # Step 6: 聚合基金熱度
+    resp = requests.post(f"{MKT}/fund_heat", json={"fund_codes": [selected_fund]}, timeout=20)
+    fund_heat = resp.json().get("data", {}).get(selected_fund, {})
+
+    # Step 7: 基金基本資料
+    fmeta = funds[funds["code"] == selected_fund].iloc[0].to_dict()
+    pick = {
+        "name": fmeta["name"],
+        "code": fmeta["code"],
+        "category": fmeta["category"],
+        "fee": fmeta["fee"],
+        "currency": fmeta["currency"],
+        "aum": fmeta["aum (NTD million)"],
+        "manager": fmeta["manager"],
+        "beta": selected_beta,
+        "heat": fund_heat.get("rel_volume_score", 0.0)
+    }
+
+    # Step 8: 適合度檢查
+    suitability_flags = []
+    if not (expected_range[0] <= np.mean(beta_pref) <= expected_range[1]):
+        suitability_flags.append({
+            "code": selected_fund,
+            "issue": f"您的 Beta 偏好範圍 {beta_pref} 與系統推斷風險屬性「{inferred}」不符 (建議範圍 {expected_range})"
+        })
+
+    # Step 9: 回傳
     explanation = [
-        f"系統透過跨語言模型推斷您的風險屬性為「{inferred}」，配置目標：" +
-        "、".join([f"{k}:{int(v*100)}%" for k, v in target.items()]),
-        "候選僅限凱基自家基金，並依費用低、AUM 大、熱度高進行挑選。"
+        f"根據您輸入的 Beta 偏好範圍 {beta_pref}，系統挑選出 {pick['name']} (Beta={selected_beta:.2f})",
+        f"系統模型推斷您屬於「{inferred}」型投資人 (建議 Beta 範圍 {expected_range})",
+        "基金 Beta 來自持股股票 Beta 的加權平均，並參考基金市場熱度。"
     ]
 
     return {
         "risk_inferred": inferred,
-        "target_allocation": target,
-        "picks": picks,
+        "selected_fund": pick,
         "explanation": explanation,
-        "market_heat": {"source": resp.json().get("source", "mixed"), "data": fund_heat}
+        "suitability_flags": suitability_flags,
+        "market_heat": fund_heat
     }
 
 

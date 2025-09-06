@@ -269,41 +269,85 @@ def load_holdings_map() -> dict:
 @app.post("/fund_heat")
 def fund_heat(payload: dict):
     """
-    參數: {"fund_codes": ["KGI_US_EQ", "KGI_BOND_IG", ...]}
-    回傳: {"source":"live|backup|mixed","data":{"KGI_US_EQ":{"rel_volume_score":0.42,"coverage":18,"missing":["..."]}}}
+    參數: {"fund_codes": ["G006_USD", "G011_USD", ...]}
+    回傳: 
+    {
+      "source": "live|backup|mixed",
+      "data": {
+        "G006_USD": {
+          "rel_volume_score": 0.42,
+          "coverage": 8,
+          "missing": ["AAPL", "ANET"]
+        }
+      }
+    }
     """
     fund_codes: List[str] = payload.get("fund_codes", [])
     logging.info(f"[fund_heat] fund_codes={fund_codes}")
     if not fund_codes:
         return {"source": "mixed", "data": {}}
 
-    holdings_map = load_holdings_map()  # fund_code -> [tickers]
+    holdings_map = load_holdings_map()  # fund_code -> {ticker: weight}
     logging.info(f"[fund_heat] holdings_map keys={list(holdings_map.keys())[:5]}")
-    # 收集所有需要的股票
-    all_tickers = sorted({t for fc in fund_codes for t in holdings_map.get(fc, [])})
-    logging.info(f"[fund_heat] all_tickers={all_tickers}")
-    if not all_tickers:
-        return {"source": "mixed", "data": {fc: {"rel_volume_score": 0.0, "coverage": 0, "missing": []} for fc in fund_codes}}
 
-    # 直接重用你現有的邏輯，拿到個股的 heat
+    # 收集所有需要的股票
+    all_tickers = sorted({t for fc in fund_codes for t in holdings_map.get(fc, {}).keys()})
+    logging.info(f"[fund_heat] all_tickers={all_tickers}")
+
+    if not all_tickers:
+        return {
+            "source": "mixed",
+            "data": {fc: {"rel_volume_score": 0.0, "coverage": 0, "missing": []} for fc in fund_codes}
+        }
+
+    # 個股熱度
     heat_resp = heat({"tickers": all_tickers})
-    logging.info(f"[fund_heat] per_ticker={heat_resp}")
     per_ticker = heat_resp.get("data", {})
     source = heat_resp.get("source", "mixed")
 
-    # 依各基金持股聚合均值
+    # 聚合基金熱度（加權平均）
     result = {}
     for fc in fund_codes:
-        ts = holdings_map.get(fc, [])
+        ts = holdings_map.get(fc, {})
         scores = []
+        weights = []
         missing = []
-        for t in ts:
+
+        for t, w in ts.items():
             s = per_ticker.get(t, {}).get("rel_volume_score")
             if s is None:
                 missing.append(t)
             else:
-                scores.append(float(s))
-        agg = float(sum(scores)/len(scores)) if scores else 0.0
-        result[fc] = {"rel_volume_score": agg, "coverage": len(scores), "missing": missing}
+                scores.append(float(s) * float(w))
+                weights.append(float(w))
+
+        agg = float(sum(scores) / sum(weights)) if weights else 0.0
+        result[fc] = {"rel_volume_score": agg, "coverage": len(weights), "missing": missing}
+
     logging.info(f"[fund_heat] result={result}")
     return {"source": source, "data": result}
+
+@app.post("/history")
+def history(payload: dict):
+    """
+    參數: {"tickers": ["MSFT","NVDA"], "days": 180}
+    回傳: {"data": {ticker: [{"date": "...", "close": ...}, ...]}}
+    """
+    tickers: List[str] = payload.get("tickers", [])
+    days: int = payload.get("days", 180)
+
+    df = yf_get_histories(tickers, days=days, interval="1d")
+    if df.empty:
+        return {"source": "empty", "data": {}}
+
+    result = {}
+    for t, g in df.groupby("ticker"):
+        g = g.sort_values("date")
+        result[t] = [
+            {"date": str(d), "close": float(c)}
+            for d, c in zip(g["date"], g["Close"])
+            if not pd.isna(c)
+        ]
+    return {"source": "live", "data": result}
+
+

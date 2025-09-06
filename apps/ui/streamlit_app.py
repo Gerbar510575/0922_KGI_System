@@ -1,6 +1,6 @@
 import streamlit as st, pandas as pd, requests, os
 
-GATE = os.getenv("GATEWAY_URL","http://localhost:8000")
+GATE = os.getenv("GATEWAY_URL", "http://localhost:8000")
 CSV_PATH = os.getenv("TRAIN_CSV_PATH", "train.csv")
 
 df = pd.read_csv(CSV_PATH)
@@ -16,7 +16,7 @@ property_opts = df["Property_Area"].dropna().unique().tolist()
 st.set_page_config(page_title="KGI 個人化投資建議", layout="wide")
 st.title("AI 個人化投資建議系統")
 
-tab1, tab2, tab3 = st.tabs(["填寫屬性", "建議與引用", "生成報告"])
+tab1, tab2, tab3 = st.tabs(["填寫屬性", "建議基金", "知識檢索與報告"])
 
 # --- Tab1: KYC 表單 ---
 with tab1:
@@ -30,9 +30,11 @@ with tab1:
         property_area = st.selectbox("Property Area", property_opts)
         applicant_income = st.number_input("Applicant Income", min_value=0)
         coapplicant_income = st.number_input("Coapplicant Income", min_value=0)
-        goal = st.selectbox("投資目標", ["退休","教育","增長"], index=0)
-        horizon = st.number_input("投資期限（年）", 1, 30, 5)
-        prefs = st.multiselect("偏好", ["低費用","ESG","美元資產"], default=["低費用"])
+
+        # === 新增 Beta 偏好輸入 ===
+        beta_min = st.number_input("Beta 最小值", value=0.8, step=0.1)
+        beta_max = st.number_input("Beta 最大值", value=1.2, step=0.1)
+
         submit = st.form_submit_button("取得建議")
 
     if submit:
@@ -46,38 +48,60 @@ with tab1:
             "Property_Area": property_area,
             "ApplicantIncome": applicant_income,
             "CoapplicantIncome": coapplicant_income,
-            "goal": goal,
-            "horizon_years": horizon,
-            "preferences": prefs,
+            "beta_pref": [beta_min, beta_max],   # 傳到後端
         }
         payload = {"kyc": client}
         st.session_state["client"] = client
-        st.session_state["advice"] = requests.post(f"{GATE}/advise", json=payload, timeout=60).json()
-        st.success("✅ 已生成建議，請切換到『建議與引用』")
+        st.session_state["advice"] = requests.post(f"{GATE}/advise", json=payload, timeout=90).json()
+        st.success("✅ 已生成建議，請切換到『建議基金』")
 
-# --- Tab2: 建議 + RAG 問答 ---
+# --- Tab2: 顯示基金建議 ---
 with tab2:
     if "advice" in st.session_state:
-        st.subheader("投資建議")
-        st.json(st.session_state["advice"])
+        st.subheader("投資建議基金")
+        fund = st.session_state["advice"]["selected_fund"]
+        st.write("### 基金基本資訊")
+        st.table(pd.DataFrame([fund]))
+        st.write("### 推薦理由")
+        for line in st.session_state["advice"]["explanation"]:
+            st.write("- " + line)
 
-        st.subheader("輸入您的問題")
-        question = st.text_input("例如：基金的收益來源與風險揭露？")
-        if st.button("取得引用"):
-            query = "；".join([p.get("name","") for p in st.session_state["advice"].get("picks", [])]) + " " + question
-            st.session_state["refs"] = requests.post(f"{GATE}/rag/fusion", json={
-                "query": query, "backend": "qdrant", "topk": 3, "topn_context": 6
-            }, timeout=90).json()
-            st.success("✅ 已取得引用，請切到『生成報告』")
+        if st.session_state["advice"].get("suitability_flags"):
+            st.warning("⚠️ 適合度提醒")
+            for f in st.session_state["advice"]["suitability_flags"]:
+                st.write(f"- {f['code']}：{f['issue']}")
 
-# --- Tab3: 生成報告 ---
+# --- Tab3: 顯示 RAG 與報告 ---
 with tab3:
-    if "advice" in st.session_state and "refs" in st.session_state:
-        payload = {"client": st.session_state["client"], "advice": st.session_state["advice"], "refs": st.session_state["refs"]}
-        r = requests.post(f"{GATE}/report", json=payload, timeout=90).json()
-        fname = f"{st.session_state['client']['name']}_投資建議報告.md"
-        st.download_button("下載 Markdown", data=r["markdown"], file_name=fname)
-        st.components.v1.html(r["html"], height=700, scrolling=True)
+    if "rag" in st.session_state:
+        st.subheader("知識檢索回答 (RAG)")
+        rag = st.session_state["rag"]
+        if rag.get("answer"):
+            st.markdown(f"**AI 回答：**\n\n{rag['answer']}")
+        if rag.get("contexts"):
+            st.markdown("**引用來源：**")
+            for i, ctx in enumerate(rag["contexts"], 1):
+                st.markdown(f"""
+                **{i}. 來源：** {ctx.get('source')}  
+                - 頁碼：{ctx.get('page', '未知')}  
+                - 類型：{ctx.get('doc_type', '未知')}  
+                - 截止日期：{ctx.get('asof_date', '未知')}  
+                - 摘要：{ctx.get('chunk', '')[:300]}...
+                """)
+
+    if "client" in st.session_state and "advice" in st.session_state:
+        if st.button("📄 生成完整投資報告"):
+            payload = {
+                "client": st.session_state["client"],
+                "advice": st.session_state["advice"],
+                "refs": {"contexts": st.session_state.get("rag", {}).get("contexts", [])},
+            }
+            rpt = requests.post(f"{GATE}/report", json=payload, timeout=120).json()
+            st.download_button("⬇️ 下載 Markdown 報告", rpt["markdown"], file_name="report.md")
+            st.download_button("⬇️ 下載 HTML 報告", rpt["html"], file_name="report.html")
+            # PDF base64 decode
+            pdf_bytes = base64.b64decode(rpt["pdf"])
+            st.download_button("⬇️ 下載 PDF 報告", pdf_bytes, file_name="report.pdf", mime="application/pdf")
 
 
 

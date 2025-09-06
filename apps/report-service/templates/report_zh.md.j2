@@ -1,32 +1,26 @@
 # 個人化投資建議分析報告
 
-- 客戶：**{{ client.name }}**
-- 系統判斷風險屬性：{{ advice.risk_inferred }}　
-- 投資目標：{{ client.goal }}　
+- 您的大名：**{{ client.name }}**
+- 您的風險屬性：{{ advice.risk_inferred }}　
+- 您的投資目標：{{ client.goal }}　
 - 投資期限：{{ client.horizon_years }} 年
 
 ---
 
-## 一、建議基金配置
-{% if charts.alloc_pie %}
-![配置圖]({{ charts.alloc_pie }})
-{% endif %}
-
-{% for k,v in advice.target_allocation.items() -%}
-- {{ k }}：**{{ (v*100)|round(0) }}%**
-{% endfor %}
+## 一、推薦基金
+| 名稱 | 代碼 | 分類 | Beta | 費用率 | 幣別 | 規模 | 基金經理人 | 熱度 |
+|---|---|---|---:|---:|:---:|---:|---|---:|
+| {{ advice.selected_fund.name }} | {{ advice.selected_fund.code }} | {{ advice.selected_fund.category }} | {{ advice.selected_fund.beta|round(2) }} | {{ advice.selected_fund.fee }} | {{ advice.selected_fund.currency }} | {{ advice.selected_fund.aum }} | {{ advice.selected_fund.manager }} | {{ advice.selected_fund.heat|round(2) }} |
 
 ---
 
-## 二、建議基金清單
-| 基金名稱 | 分類 | 建議比重 | 費用率 | 幣別 | 區域 | 熱度分數 | 說明 |
-|---|---|---:|---:|:---:|:---:|---:|---|
-{% for p in advice.picks -%}
-| {{ p.name }} ({{ p.code }}) | {{ p.category }} | {{ (p.weight*100)|round(1) }}% | {{ p.fee }} | {{ p.currency }} | {{ p.region }} | {{ p.get("heat",0)|round(2) }} | AUM: {{ p.aum }} |
+## 二、推薦理由
+{% for line in advice.explanation -%}
+- {{ line }}
 {% endfor %}
 
 {% if advice.suitability_flags %}
-> **適合度提醒**  
+> ⚠️ **適合度提醒**  
 {% for f in advice.suitability_flags -%}
 - {{ f.code }}：{{ f.issue }}
 {% endfor %}
@@ -35,10 +29,17 @@
 ---
 
 ## 三、依據與引用（RAG）
+{% if refs and refs.contexts %}
 {% for h in refs.contexts -%}
 - 來源：{{ h.source }}  
+  頁碼：{{ h.page or "未知" }}  
+  類型：{{ h.doc_type or "未知" }}  
+  截止日期：{{ h.asof_date or "未知" }}  
   摘要：{{ h.text }}
 {% endfor %}
+{% else %}
+- (無引用內容)
+{% endif %}
 
 ---
 
@@ -53,5 +54,7 @@
 本報告為投資建議示範，僅供參考。  
 基金投資有風險，過去績效不代表未來表現。  
 建議搭配完整 KYC 與專業理財顧問諮詢。
+
+
 
 

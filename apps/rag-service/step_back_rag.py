@@ -49,18 +49,10 @@ def build_response_chain(llm: GeminiLLM):
     return PromptTemplate.from_template(tmpl) | llm | StrOutputParser()
 
 # ---------- 對外：一次完成 Step-Back RAG ----------
-def run_step_back_rag(
-    question: str,
-    backend: str = "qdrant",
-    topk_normal: int = 4,
-    topk_step: int = 4,
-    urls: List[str] | None = None,
-    temperature: float = 0.0,
-    model: str = "models/gemini-2.5-flash",
-) -> Dict[str, Any]:
+def run_step_back_rag(..., doc_type: str | None = None) -> Dict[str, Any]:
     llm = GeminiLLM(model=model, temperature=temperature)
-    retr_normal = build_qdrant_retriever(top_k=topk_normal) if backend=="qdrant" else build_chroma_retriever(urls=urls, top_k=topk_normal)
-    retr_step   = build_qdrant_retriever(top_k=topk_step)   if backend=="qdrant" else build_chroma_retriever(urls=urls, top_k=topk_step)
+    retr_normal = build_qdrant_retriever(top_k=topk_normal, doc_type=doc_type) if backend=="qdrant" else build_chroma_retriever(urls=urls, top_k=topk_normal)
+    retr_step   = build_qdrant_retriever(top_k=topk_step,   doc_type=doc_type) if backend=="qdrant" else build_chroma_retriever(urls=urls, top_k=topk_step)
 
     step_q = build_step_back_chain(llm).invoke({"question": question}).strip()
     normal_docs = retr_normal.get_relevant_documents(question)
@@ -70,12 +62,7 @@ def run_step_back_rag(
     step_ctx   = join_docs(step_docs,   top_k=topk_step)
     answer = build_response_chain(llm).invoke({"normal_ctx": normal_ctx, "step_ctx": step_ctx, "question": question})
 
-    return {
-        "backend": backend,
-        "step_back_question": step_q,
-        "answer": answer,
-        "normal_contexts": collect_context_items(normal_docs, top_k=topk_normal),
-        "step_back_contexts": collect_context_items(step_docs,   top_k=topk_step),
-    }
+    return {"answer": answer, "step_back_question": step_q, "normal_contexts": collect_context_items(normal_docs), "step_back_contexts": collect_context_items(step_docs), "backend": backend}
+
 
 

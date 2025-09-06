@@ -57,8 +57,8 @@ services:
     container_name: gateway
     environment:
       RAG_URL: http://rag:8002
-      ADVISOR_URL: http://advisor:8003   # <── 新增
-      REPORT_URL: http://report:8004     # <── 新增
+      ADV_URL: http://advisor:8003
+      RPT_URL: http://report:8004
     volumes:
       - ../apps/gateway:/app
     depends_on:
@@ -74,7 +74,7 @@ services:
       dockerfile: infra/docker/advisor-service/Dockerfile
     container_name: advisor
     environment:
-      MKT_URL: http://market:8005        # <── 新增
+      MKT_URL: http://market:8005
       ML_BRIDGE_URL: http://ml-bridge:7000
     volumes:
       - ../apps/advisor-service:/app
@@ -83,6 +83,7 @@ services:
       - ml-bridge
     ports:
       - "8003:8003"
+
 
   report:
     build:

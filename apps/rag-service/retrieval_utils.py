@@ -66,11 +66,15 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 COLLECTION  = os.getenv("QDRANT_COLLECTION", "kfh_docs_gemini")
 
 # ---------------- Retrievers ----------------
-def build_qdrant_retriever(top_k: int = 3):
+def build_qdrant_retriever(top_k: int = 3, doc_type: str | None = None):
     cli = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
     emb = GeminiEmbeddings()
     vs = LCQdrant(client=cli, collection_name=COLLECTION, embeddings=emb)
-    return vs.as_retriever(search_kwargs={"k": top_k})
+    search_kwargs = {"k": top_k}
+    if doc_type:
+        search_kwargs["filter"] = {"must": [{"key": "doc_type", "match": {"value": doc_type}}]}
+    return vs.as_retriever(search_kwargs=search_kwargs)
+
 
 def build_chroma_retriever(
     docs_dir: str = "data/docs",
@@ -135,6 +139,10 @@ def collect_context_items(docs: List[Document], top_k: int = 4) -> List[Dict[str
         meta = d.metadata if isinstance(d.metadata, dict) else {}
         items.append({
             "source": meta.get("source") or meta.get("file_path") or "unknown",
+            "doc_type": meta.get("doc_type", "unknown"),
+            "page": meta.get("page", ""),
+            "asof_date": meta.get("asof_date", ""),
+            "score": meta.get("score", 0.0),
             "chunk": d.page_content[:800]
         })
     return items
