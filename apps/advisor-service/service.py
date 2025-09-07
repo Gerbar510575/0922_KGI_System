@@ -83,17 +83,20 @@ def get_daily_returns(tickers: List[str]) -> pd.DataFrame:
 # === 計算個股 beta ===
 def compute_stock_betas(daily_return: pd.DataFrame) -> dict:
     market_returns = daily_return.mean(axis=1)
-    excess_market = market_returns - (0.02/252)
+    excess_market = market_returns - (0.045/252)
     betas = {}
     for ticker in daily_return.columns:
-        y = daily_return[ticker] - (0.02/252)
+        y = daily_return[ticker] - (0.045/252)
         X = sm.add_constant(excess_market)
         try:
             model = sm.OLS(y, X).fit()
-            betas[ticker] = float(model.params[1]) if len(model.params) > 1 else 0.0
+            # 改成用名稱取值，不要用 index
+            beta_val = model.params.iloc[1] if len(model.params) > 1 else 0.0
+            betas[ticker] = float(beta_val)
         except Exception:
             betas[ticker] = 0.0
     return betas
+
 
 # === 計算基金 beta (持股加權平均) ===
 def compute_fund_betas(holdings_map: dict, stock_betas: dict) -> dict:
@@ -185,5 +188,37 @@ def advise(payload: dict):
         "suitability_flags": suitability_flags,
         "market_heat": fund_heat
     }
+
+@app.get("/debug_betas")
+def debug_betas():
+    try:
+        holdings_map = json.load(open(HOLDINGS_PATH, "r", encoding="utf-8"))
+        tickers = list({t for fc in holdings_map for t in holdings_map[fc]})
+        daily_return = get_daily_returns(tickers)
+
+        stock_betas = {}
+        market_returns = daily_return.mean(axis=1)
+        excess_market = market_returns - (0.02/252)
+
+        for ticker in daily_return.columns:
+            y = daily_return[ticker] - (0.02/252)
+            X = sm.add_constant(excess_market)
+            model = sm.OLS(y, X).fit()
+            
+            # Debug：印出 summary
+            print(f"=== {ticker} ===")
+            print(model.summary())
+            
+            beta_val = model.params.iloc[1] if len(model.params) > 1 else 0.0
+            stock_betas[ticker] = float(beta_val)
+
+        fund_betas = compute_fund_betas(holdings_map, stock_betas)
+
+        return {
+            "stock_betas": stock_betas,
+            "fund_betas": fund_betas
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"debug_betas failed: {e}")
 
 

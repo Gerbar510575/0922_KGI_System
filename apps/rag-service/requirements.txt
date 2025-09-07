@@ -12,3 +12,4 @@ tiktoken==0.7.0
 pdfminer.six==20231228
 pypdf
 langchain-google-genai
+pdfplumber

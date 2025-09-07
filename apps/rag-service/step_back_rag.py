@@ -49,20 +49,42 @@ def build_response_chain(llm: GeminiLLM):
     return PromptTemplate.from_template(tmpl) | llm | StrOutputParser()
 
 # ---------- 對外：一次完成 Step-Back RAG ----------
-def run_step_back_rag(..., doc_type: str | None = None) -> Dict[str, Any]:
+def run_step_back_rag(
+    question: str,
+    backend: str = "qdrant",
+    topk_normal: int = 3,
+    topk_step: int = 3,
+    urls: List[str] | None = None,
+    model: str = "models/gemini-2.5-flash",
+    temperature: float = 0.0,
+    doc_type: str | None = None,
+) -> Dict[str, Any]:
     llm = GeminiLLM(model=model, temperature=temperature)
-    retr_normal = build_qdrant_retriever(top_k=topk_normal, doc_type=doc_type) if backend=="qdrant" else build_chroma_retriever(urls=urls, top_k=topk_normal)
-    retr_step   = build_qdrant_retriever(top_k=topk_step,   doc_type=doc_type) if backend=="qdrant" else build_chroma_retriever(urls=urls, top_k=topk_step)
+    retr_normal = (
+        build_qdrant_retriever(top_k=topk_normal, doc_type=doc_type)
+        if backend == "qdrant" else build_chroma_retriever(urls=urls, top_k=topk_normal)
+    )
+    retr_step = (
+        build_qdrant_retriever(top_k=topk_step, doc_type=doc_type)
+        if backend == "qdrant" else build_chroma_retriever(urls=urls, top_k=topk_step)
+    )
 
     step_q = build_step_back_chain(llm).invoke({"question": question}).strip()
     normal_docs = retr_normal.get_relevant_documents(question)
-    step_docs   = retr_step.get_relevant_documents(step_q)
+    step_docs = retr_step.get_relevant_documents(step_q)
 
     normal_ctx = join_docs(normal_docs, top_k=topk_normal)
-    step_ctx   = join_docs(step_docs,   top_k=topk_step)
-    answer = build_response_chain(llm).invoke({"normal_ctx": normal_ctx, "step_ctx": step_ctx, "question": question})
+    step_ctx = join_docs(step_docs, top_k=topk_step)
+    answer = build_response_chain(llm).invoke(
+        {"normal_ctx": normal_ctx, "step_ctx": step_ctx, "question": question}
+    )
 
-    return {"answer": answer, "step_back_question": step_q, "normal_contexts": collect_context_items(normal_docs), "step_back_contexts": collect_context_items(step_docs), "backend": backend}
-
+    return {
+        "answer": answer,
+        "step_back_question": step_q,
+        "normal_contexts": collect_context_items(normal_docs),
+        "step_back_contexts": collect_context_items(step_docs),
+        "backend": backend,
+    }
 
 

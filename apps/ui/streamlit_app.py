@@ -1,4 +1,4 @@
-import streamlit as st, pandas as pd, requests, os
+import streamlit as st, pandas as pd, requests, os, base64
 
 GATE = os.getenv("GATEWAY_URL", "http://localhost:8000")
 CSV_PATH = os.getenv("TRAIN_CSV_PATH", "train.csv")
@@ -48,14 +48,14 @@ with tab1:
             "Property_Area": property_area,
             "ApplicantIncome": applicant_income,
             "CoapplicantIncome": coapplicant_income,
-            "beta_pref": [beta_min, beta_max],   # 傳到後端
+            "beta_pref": [beta_min, beta_max],
         }
         payload = {"kyc": client}
         st.session_state["client"] = client
         st.session_state["advice"] = requests.post(f"{GATE}/advise", json=payload, timeout=90).json()
         st.success("✅ 已生成建議，請切換到『建議基金』")
 
-# --- Tab2: 顯示基金建議 ---
+# --- Tab2: 顯示基金建議 + 問答 ---
 with tab2:
     if "advice" in st.session_state:
         st.subheader("投資建議基金")
@@ -70,6 +70,19 @@ with tab2:
             st.warning("⚠️ 適合度提醒")
             for f in st.session_state["advice"]["suitability_flags"]:
                 st.write(f"- {f['code']}：{f['issue']}")
+
+        # 新增：基金相關提問
+        st.write("### 詢問基金相關問題")
+        q = st.text_input("請輸入問題（例如：基金風險、投資標的...）")
+        if st.button("🔎 發送問題"):
+            if q.strip():
+                rag_payload = {"query": q}
+                try:
+                    rag_resp = requests.post(f"{GATE}/rag/auto", json=rag_payload, timeout=90).json()
+                    st.session_state["rag"] = rag_resp
+                    st.success("✅ 已取得知識檢索結果，請切換到『知識檢索與報告』")
+                except Exception as e:
+                    st.error(f"❌ RAG 查詢失敗: {e}")
 
 # --- Tab3: 顯示 RAG 與報告 ---
 with tab3:
@@ -97,11 +110,16 @@ with tab3:
                 "refs": {"contexts": st.session_state.get("rag", {}).get("contexts", [])},
             }
             rpt = requests.post(f"{GATE}/report", json=payload, timeout=120).json()
-            st.download_button("⬇️ 下載 Markdown 報告", rpt["markdown"], file_name="report.md")
-            st.download_button("⬇️ 下載 HTML 報告", rpt["html"], file_name="report.html")
-            # PDF base64 decode
-            pdf_bytes = base64.b64decode(rpt["pdf"])
-            st.download_button("⬇️ 下載 PDF 報告", pdf_bytes, file_name="report.pdf", mime="application/pdf")
+
+            if rpt.get("markdown"):
+                st.download_button("⬇️ 下載 Markdown 報告", rpt["markdown"], file_name="report.md")
+            if rpt.get("html"):
+                st.download_button("⬇️ 下載 HTML 報告", rpt["html"], file_name="report.html")
+            if rpt.get("pdf"):
+                pdf_bytes = base64.b64decode(rpt["pdf"])
+                st.download_button("⬇️ 下載 PDF 報告", pdf_bytes, file_name="report.pdf", mime="application/pdf")
+
+
 
 
 

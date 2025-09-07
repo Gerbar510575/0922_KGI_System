@@ -42,20 +42,35 @@ def build_final_rag_chain(llm: GeminiLLM):
     return PromptTemplate.from_template(tmpl) | llm | StrOutputParser()
 
 # ---------- 對外主入口 ----------
-def run_hyde_rag(..., doc_type: str | None = None) -> Dict[str, Any]:
+def run_hyde_rag(
+    question: str,
+    backend: str = "qdrant",
+    topk: int = 3,
+    ctx_topn: int = 5,
+    urls: List[str] | None = None,
+    model: str = "models/gemini-2.5-flash",
+    temperature: float = 0.0,
+    doc_type: str | None = None,
+) -> Dict[str, Any]:
     llm = GeminiLLM(model=model, temperature=temperature)
     retriever = (
         build_qdrant_retriever(top_k=topk, doc_type=doc_type)
-        if backend=="qdrant" else build_chroma_retriever(urls=urls, top_k=topk)
+        if backend == "qdrant" else build_chroma_retriever(urls=urls, top_k=topk)
     )
 
     hyde_passage = build_hyde_chain(llm).invoke({"question": question}).strip()
     docs = retriever.get_relevant_documents(hyde_passage)
 
     context_text = "\n\n---\n\n".join([d.page_content for d in docs[:ctx_topn]])
-    answer = build_final_rag_chain(llm).invoke({"context": context_text, "question": question})
+    answer = build_final_rag_chain(retriever, llm).invoke(
+        {"context": context_text, "question": question}
+    )
 
-    return {"answer": answer, "hyde_passage": hyde_passage, "contexts": collect_context_items(docs, top_k=ctx_topn), "backend": backend}
-
+    return {
+        "answer": answer,
+        "hyde_passage": hyde_passage,
+        "contexts": collect_context_items(docs, top_k=ctx_topn),
+        "backend": backend,
+    }
 
 

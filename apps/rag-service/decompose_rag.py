@@ -101,23 +101,52 @@ def synthesize_final_answer(llm: GeminiLLM, context_block: str, main_question: s
     )
     return (prompt | llm | StrOutputParser()).invoke({"context": context_block, "question": main_question})
 
-def run_decompose_rag(..., doc_type: str | None = None) -> Dict[str, Any]:
+def run_decompose_rag(
+    question: str,
+    backend: str = "qdrant",
+    top_k: int = 3,
+    urls: List[str] | None = None,
+    model: str = "models/gemini-2.5-flash",
+    temperature: float = 0.0,
+    strategy: str = "sequential",   # 或 "parallel"
+    doc_type: str | None = None,
+) -> Dict[str, Any]:
     llm = GeminiLLM(model=model, temperature=temperature)
     retriever = (
         build_qdrant_retriever(top_k=top_k, doc_type=doc_type)
-        if backend=="qdrant" else build_chroma_retriever(urls=urls, top_k=top_k)
+        if backend == "qdrant" else build_chroma_retriever(urls=urls, top_k=top_k)
     )
     decompose_chain = build_decomposition_chain(llm)
 
     if strategy == "parallel":
-        answers, sub_questions, ctxs = retrieve_and_rag_each(...)
+        answers, sub_questions, ctxs = retrieve_and_rag_each(
+            retriever, llm, question, top_k=top_k
+        )
         qa_block = format_qa_pairs_block(sub_questions, answers)
-        final = synthesize_final_answer(llm, context_block=qa_block, main_question=question)
-        return {"answer": final, "sub_questions": sub_questions, "answers": answers, "contexts": ctxs, "backend": backend}
+        final = synthesize_final_answer(
+            llm, context_block=qa_block, main_question=question
+        )
+        return {
+            "answer": final,
+            "sub_questions": sub_questions,
+            "answers": answers,
+            "contexts": ctxs,
+            "backend": backend,
+        }
     else:
         sub_questions = decompose_chain.invoke({"question": question}) or [question]
-        qas, ctxs = answer_sub_questions_with_accumulated_qa(...)
-        final = synthesize_final_answer(llm, context_block=qas, main_question=question)
-        return {"answer": final, "sub_questions": sub_questions, "qa_pairs": qas, "contexts": ctxs, "backend": backend}
+        qas, ctxs = answer_sub_questions_with_accumulated_qa(
+            retriever, llm, sub_questions, top_k=top_k
+        )
+        final = synthesize_final_answer(
+            llm, context_block=qas, main_question=question
+        )
+        return {
+            "answer": final,
+            "sub_questions": sub_questions,
+            "qa_pairs": qas,
+            "contexts": ctxs,
+            "backend": backend,
+        }
 
 
