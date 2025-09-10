@@ -16,7 +16,7 @@ funds = pd.read_csv(FUNDS_PATH)
 MKT = os.getenv("MKT_URL", "http://market:8005")
 MLB = os.getenv("ML_BRIDGE_URL", "http://ml-bridge:7000")  # ML Bridge
 
-# === 風險屬性推斷 ===
+# === 1、風險屬性推斷 ===
 def infer_risk_via_bridge(kyc: Dict[str, Any]) -> str:
     """
     呼叫 ML Bridge 的 R 模型 (risk_r) 推斷風險。
@@ -54,7 +54,8 @@ def infer_risk_via_bridge(kyc: Dict[str, Any]) -> str:
 
     return "穩健"
 
-# === 工具：抓每日報酬 (需自行串接 market-service) ===
+
+# === 2、抓取每日報酬 ===
 def get_daily_returns(tickers: List[str]) -> pd.DataFrame:
     try:
         resp = requests.post(
@@ -80,7 +81,7 @@ def get_daily_returns(tickers: List[str]) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-# === 計算個股 beta ===
+# === 3、計算個股 beta ===
 def compute_stock_betas(daily_return: pd.DataFrame) -> dict:
     market_returns = daily_return.mean(axis=1)
     excess_market = market_returns - (0.045/252)
@@ -98,7 +99,7 @@ def compute_stock_betas(daily_return: pd.DataFrame) -> dict:
     return betas
 
 
-# === 計算基金 beta (持股加權平均) ===
+# === 4、計算基金 beta (持股加權平均) ===
 def compute_fund_betas(holdings_map: dict, stock_betas: dict) -> dict:
     fund_betas = {}
     for fc, comps in holdings_map.items():
@@ -108,6 +109,10 @@ def compute_fund_betas(holdings_map: dict, stock_betas: dict) -> dict:
         bvals = [stock_betas.get(t, 0.0) for t in tickers]
         fund_betas[fc] = float(np.dot(weights, bvals))
     return fund_betas
+
+
+
+
 
 # === API ===
 @app.post("/advise")
