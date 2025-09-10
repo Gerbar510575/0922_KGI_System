@@ -8,7 +8,7 @@ from config import (
     CHROMA_DIR,
     EMBEDDING_MODEL,
     GEMINI_MODEL,
-    GOOGLE_API_KEY,
+    GENAI_API_KEY,
     TOP_K,
     SHOW_CHAR,
 )
@@ -17,7 +17,7 @@ from config import (
 app = FastAPI(title="Fund RAG API", version="1.0.0")
 
 embed_model = SentenceTransformer(EMBEDDING_MODEL)
-genai_client = genai.Client(api_key=GOOGLE_API_KEY)
+genai_client = genai.Client(api_key=GENAI_API_KEY)
 chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
 db = chroma_client.get_collection("funds")
 

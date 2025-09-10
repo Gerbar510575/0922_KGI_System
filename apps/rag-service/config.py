@@ -10,7 +10,7 @@ EMBEDDING_MODEL = "BAAI/bge-m3"
 GEMINI_MODEL = "gemini-2.5-flash"
 
 # API key
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+GENAI_API_KEY = os.getenv("GENAI_API_KEY", "")
 
 # RAG 設定
 TOP_K = 5

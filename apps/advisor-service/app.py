@@ -7,6 +7,25 @@ from services.capm import fit_capm
 from services.fund import forecast_fund_with_plot
 from services.stock import forecast_stock_with_plot
 
+import math
+
+def sanitize_for_json(obj):
+    """遞迴清理 NaN / Inf，確保能轉成合法 JSON"""
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(v) for v in obj]
+    elif isinstance(obj, (float, np.floating)):
+        if math.isnan(obj) or math.isinf(obj):
+            return 0.0  # 你也可以改成 None
+        return float(obj)
+    elif isinstance(obj, pd.Series):
+        return [sanitize_for_json(v) for v in obj.tolist()]
+    elif isinstance(obj, pd.DataFrame):
+        return obj.applymap(sanitize_for_json).to_dict(orient="list")
+    return obj
+
+
 app = FastAPI(title="Advisor Service")
 
 # === 檔案路徑 ===
@@ -98,13 +117,14 @@ def advise(payload: dict):
         except Exception:
             stock_forecasts[t] = {}
 
-    return {
-        "selected_fund": fmeta,
-        "fund_forecast": fund_forecast,
-        "stock_betas": {t: stock_betas.get(t, 0.0) for t in holdings_map[selected_fund].keys()},
-        "stock_forecasts": stock_forecasts,
-        "market_heat": fund_heat
-    }
+    result = {
+    "selected_fund": fmeta,
+    "fund_forecast": fund_forecast,
+    "stock_betas": {t: stock_betas.get(t, 0.0) for t in holdings_map[selected_fund].keys()},
+    "stock_forecasts": stock_forecasts,
+    "market_heat": fund_heat
+}
+    return sanitize_for_json(result)
 
 # === API: 單檔股票預測 ===
 @app.post("/forecast_stock")
@@ -119,9 +139,11 @@ def forecast_stock(payload: dict):
 
     stock_forecast = forecast_stock_with_plot(ticker, daily_return)
 
-    return {
-        "stock_forecast": stock_forecast
-    }
+    result = {
+    "stock_forecast": stock_forecast
+}
+    return sanitize_for_json(result)
+
 
 
 

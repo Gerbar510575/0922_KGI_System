@@ -49,8 +49,7 @@ with tab1:
             "Self_Employed": self_emp,
             "Property_Area": property_area,
             "ApplicantIncome": applicant_income,
-            "CoapplicantIncome": coapplicant_income,
-            "beta_pref": [beta_min, beta_max],
+            "CoapplicantIncome": coapplicant_income
         }
         payload = {"kyc": client}
         st.session_state["client"] = client
@@ -123,7 +122,7 @@ with tab2:
                 rag_payload = {"query": q}
                 try:
                     #rag_resp = requests.post(f"{GATE}/rag/auto", json=rag_payload, timeout=90).json()
-                    rag_resp = requests.post(f"{GATE}/query", json=rag_payload, timeout=90).json()
+                    rag_resp = requests.post(f"{GATE}/rag/auto", json=rag_payload, timeout=90).json()
                     st.session_state["rag"] = rag_resp
                     st.success("✅ 已取得知識檢索結果，請切換到『知識檢索與報告』")
                 except Exception as e:

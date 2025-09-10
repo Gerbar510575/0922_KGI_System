@@ -19,7 +19,7 @@ def health():
 async def rag_auto(payload: dict):
     try:
         async with httpx.AsyncClient(timeout=60) as c:
-            resp = await c.post(f"{RAG}/auto", json=payload)
+            resp = await c.post(f"{RAG}/query", json=payload)
             resp.raise_for_status()
             return resp.json()
     except httpx.HTTPStatusError as e:

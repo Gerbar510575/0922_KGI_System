@@ -2,7 +2,7 @@ import numpy as np
 
 def simulate_stock_paths(alpha, beta, expected_market_return, garch_model,
                          last_price, horizon=20, n_sim=1000, seed=42):
-    forecast=garch_model.forecast(horizon=horizon)
+    forecast=garch_model.forecast(horizon=horizon, method='simulation')
     cond_vol=np.sqrt(forecast.variance.values[-1,:])
     np.random.seed(seed)
     paths=[]
