@@ -2,11 +2,11 @@
 import chromadb
 from fastapi import FastAPI
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
+#from sentence_transformers import SentenceTransformer
 from google import genai
 from config import (
     CHROMA_DIR,
-    EMBEDDING_MODEL,
+    #EMBEDDING_MODEL,
     GEMINI_MODEL,
     GENAI_API_KEY,
     TOP_K,
@@ -16,7 +16,7 @@ from config import (
 # ---------------- Init ----------------
 app = FastAPI(title="Fund RAG API", version="1.0.0")
 
-embed_model = SentenceTransformer(EMBEDDING_MODEL)
+#embed_model = SentenceTransformer(EMBEDDING_MODEL)
 genai_client = genai.Client(api_key=GENAI_API_KEY)
 chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
 db = chroma_client.get_collection("funds")

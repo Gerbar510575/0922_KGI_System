@@ -80,39 +80,49 @@ with tab2:
         # 基金價格預測
         if "fund_forecast" in st.session_state["advice"]:
             fc = st.session_state["advice"]["fund_forecast"]
-            st.write("### 基金價格預測 (CAPM+GARCH)")
+            st.write("### 基金價格預測 (CAPM+i.i.d. 殘差模擬)")
+            
+            vals = [
+                fc["price_scenarios"]["P5_10d"],
+                fc["price_scenarios"]["Median_10d"],
+                fc["price_scenarios"]["P95_10d"]
+            ]
+
             fig, ax = plt.subplots()
-            ax.bar(
-                ["P5", "Median", "P95"],
-                [fc["price_scenarios"].get("p5"),
-                 fc["price_scenarios"].get("median"),
-                 fc["price_scenarios"].get("p95")]
-            )
+            ax.bar(["P5", "Median", "P95"], vals)
             ax.set_ylabel("Price")
             st.pyplot(fig)
+
+            # 額外顯示模型繪圖
+            if fc["forecast_plot"]:
+                st.image(fc["forecast_plot"], caption="基金預測圖")
 
         # 個股價格預測
         if "stock_forecasts" in st.session_state["advice"]:
             st.write("### 基金持股之個股價格預測")
             fig, ax = plt.subplots()
             for t, fc in st.session_state["advice"]["stock_forecasts"].items():
-                ax.plot(
-                    ["P5", "Median", "P95"], 
-                    [fc["price_scenarios"].get("p5"),
-                     fc["price_scenarios"].get("median"),
-                     fc["price_scenarios"].get("p95")],
-                    label=t
-                )
+                vals = [
+                    fc["P5_10d"],
+                    fc["Median_10d"],
+                    fc["P95_10d"]
+                ]
+                ax.plot(["P5", "Median", "P95"], vals, marker="o", label=t)
+
             ax.set_ylabel("Price")
             ax.legend()
             st.pyplot(fig)
+
+            # 額外顯示各股票的繪圖
+            for t, fc in st.session_state["advice"]["stock_forecasts"].items():
+                if fc["forecast_plot"]:
+                    st.image(fc["forecast_plot"], caption=f"{t} 預測圖")
 
         # 基金市場熱度
         if "market_heat" in st.session_state["advice"]:
             heat = st.session_state["advice"]["market_heat"]
             st.write("### 基金市場熱度")
-            st.metric(label="Relative Volume Score", value=f"{heat.get('rel_volume_score', 0.0):.2f}")
-
+            st.metric(label="Relative Volume Score", value=f"{heat['rel_volume_score']:.2f}")
 
         # 新增：基金相關提問
         st.write("### 詢問基金相關問題")
@@ -120,13 +130,9 @@ with tab2:
         if st.button("🔎 發送問題"):
             if q.strip():
                 rag_payload = {"query": q}
-                try:
-                    #rag_resp = requests.post(f"{GATE}/rag/auto", json=rag_payload, timeout=90).json()
-                    rag_resp = requests.post(f"{GATE}/rag/auto", json=rag_payload, timeout=90).json()
-                    st.session_state["rag"] = rag_resp
-                    st.success("✅ 已取得知識檢索結果，請切換到『知識檢索與報告』")
-                except Exception as e:
-                    st.error(f"❌ RAG 查詢失敗: {e}")
+                rag_resp = requests.post(f"{GATE}/rag/auto", json=rag_payload, timeout=90).json()
+                st.session_state["rag"] = rag_resp
+                st.success("✅ 已取得知識檢索結果，請切換到『知識檢索與報告』")
 
 # --- Tab3: 顯示 RAG 與報告 ---
 with tab3:
@@ -134,11 +140,9 @@ with tab3:
         st.subheader("知識檢索回答 (RAG)")
         rag = st.session_state["rag"]
 
-        # AI 回答
         if rag.get("answer"):
             st.markdown(f"**AI 回答：**\n\n{rag['answer']}")
 
-        # 引用來源
         if rag.get("passages"):
             st.markdown("**引用來源：**")
             for p in rag["passages"]:
@@ -156,21 +160,28 @@ with tab3:
         if st.button("📄 生成完整投資報告"):
             payload = {
                 "client": st.session_state["client"],
-                "advice": st.session_state["advice"],
+                "advice": st.session_state["advice"],  # Tab2 全部內容
                 "refs": {
                     "answer": st.session_state.get("rag", {}).get("answer", ""),
                     "contexts": st.session_state.get("rag", {}).get("passages", [])
                 },
             }
-            rpt = requests.post(f"{GATE}/report", json=payload, timeout=120).json()
+            try:
+                resp = requests.post(f"{GATE}/report", json=payload, timeout=120)
+                resp.raise_for_status()
+                rpt = resp.json()
 
-            if "markdown" in rpt:
-                st.download_button("⬇️ 下載 Markdown 報告", rpt["markdown"], file_name="report.md")
-            if "html" in rpt:
-                st.download_button("⬇️ 下載 HTML 報告", rpt["html"], file_name="report.html")
-            if "pdf" in rpt:
-                pdf_bytes = base64.b64decode(rpt["pdf"])
-                st.download_button("⬇️ 下載 PDF 報告", pdf_bytes, file_name="report.pdf", mime="application/pdf")
+                if "markdown" in rpt:
+                    st.download_button("⬇️ 下載 Markdown 報告", rpt["markdown"], file_name="report.md")
+                if "html" in rpt:
+                    st.download_button("⬇️ 下載 HTML 報告", rpt["html"], file_name="report.html")
+                if "pdf" in rpt:
+                    pdf_bytes = base64.b64decode(rpt["pdf"])
+                    st.download_button("⬇️ 下載 PDF 報告", pdf_bytes, file_name="report.pdf", mime="application/pdf")
+
+            except Exception as e:
+                st.error(f"❌ 報告生成失敗: {e}")
+
 
 
 

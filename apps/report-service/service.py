@@ -4,15 +4,14 @@ import markdown, io, base64, matplotlib.pyplot as plt
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
+import json
 
 app = FastAPI(title="Report Service")
 env = Environment(loader=FileSystemLoader("templates"), autoescape=True)
 tpl = env.get_template("report_zh.md.j2")
 
-
 # === 畫圖 ===
 def plot_price(dates, prices, title="基金價格走勢"):
-    """回傳 base64 圖片給前端 HTML/Markdown 用"""
     if not dates or not prices:
         return ""
     fig, ax = plt.subplots(figsize=(6, 3))
@@ -25,9 +24,7 @@ def plot_price(dates, prices, title="基金價格走勢"):
     plt.close(fig)
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
-
 def plot_price_raw(dates, prices, title="基金價格走勢"):
-    """回傳 BytesIO 給 PDF 內嵌用"""
     if not dates or not prices:
         return None
     buf = io.BytesIO()
@@ -41,7 +38,6 @@ def plot_price_raw(dates, prices, title="基金價格走勢"):
     buf.seek(0)
     return buf
 
-
 # === Markdown 轉 PDF ===
 def md_to_pdf(md_text: str, charts: dict) -> bytes:
     styles = getSampleStyleSheet()
@@ -50,14 +46,12 @@ def md_to_pdf(md_text: str, charts: dict) -> bytes:
         if not line.strip():
             story.append(Spacer(1, 12))
         else:
-            # 簡單判斷 markdown 標題
             if line.startswith("## "):
                 story.append(Paragraph(f"<b>{line[3:]}</b>", styles["Heading2"]))
             elif line.startswith("# "):
                 story.append(Paragraph(f"<b>{line[2:]}</b>", styles["Heading1"]))
             else:
                 story.append(Paragraph(line, styles["Normal"]))
-    # 插入圖表（如果有）
     if charts.get("price_raw"):
         story.append(Spacer(1, 12))
         story.append(Image(charts["price_raw"], width=400, height=200))
@@ -66,11 +60,13 @@ def md_to_pdf(md_text: str, charts: dict) -> bytes:
     doc.build(story)
     return buf.getvalue()
 
-
 # === API ===
 @app.post("/report")
 def generate(payload: dict):
     try:
+        print("=== [DEBUG] 收到的 payload ===")
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+
         charts = {}
 
         # 如果 payload 有價格序列，就生成圖表
@@ -86,17 +82,35 @@ def generate(payload: dict):
                 title=payload["series"].get("title", "基金走勢")
             )
 
-        # 渲染 Markdown 報告
-        md = tpl.render(**payload, charts=charts)
-        html = markdown.markdown(md, extensions=["tables"])
-        pdf_bytes = md_to_pdf(md, charts)
+        # 嘗試 Jinja2 渲染
+        try:
+            md = tpl.render(**payload, charts=charts)
+        except Exception as je:
+            print(f"[ERROR] Jinja2 渲染失敗: {je}")
+            raise HTTPException(status_code=500, detail=f"Jinja2 渲染失敗: {je}")
+
+        # Markdown → HTML
+        try:
+            html = markdown.markdown(md, extensions=["tables"])
+        except Exception as me:
+            print(f"[ERROR] Markdown 轉換失敗: {me}")
+            raise HTTPException(status_code=500, detail=f"Markdown 轉換失敗: {me}")
+
+        # Markdown → PDF
+        try:
+            pdf_bytes = md_to_pdf(md, charts)
+        except Exception as pe:
+            print(f"[ERROR] PDF 生成失敗: {pe}")
+            raise HTTPException(status_code=500, detail=f"PDF 生成失敗: {pe}")
 
         return {
             "markdown": md,
             "html": html,
             "pdf": base64.b64encode(pdf_bytes).decode()
         }
+
     except Exception as e:
+        print(f"[ERROR] 報告生成失敗: {e}")
         raise HTTPException(status_code=500, detail=f"report generation failed: {e}")
 
 

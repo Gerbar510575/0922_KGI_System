@@ -1,40 +1,70 @@
 # 個人化投資建議分析報告
 
 - 您的大名：**{{ client.name }}**
-- 您的風險屬性：{{ advice.risk_inferred }}　
-- 您的投資目標：{{ client.goal }}　
-- 投資期限：{{ client.horizon_years }} 年
 
 ---
 
 ## 一、推薦基金
-| 名稱 | 代碼 | 分類 | Beta | 費用率 | 幣別 | 規模 | 基金經理人 | 熱度 |
-|---|---|---|---:|---:|:---:|---:|---|---:|
-| {{ advice.selected_fund.name }} | {{ advice.selected_fund.code }} | {{ advice.selected_fund.category }} | {{ advice.selected_fund.beta|round(2) }} | {{ advice.selected_fund.fee }} | {{ advice.selected_fund.currency }} | {{ advice.selected_fund.aum }} | {{ advice.selected_fund.manager }} | {{ advice.selected_fund.heat|round(2) }} |
+| 名稱 | 代碼 | 分類 | Beta | 費用率 | 幣別 | 規模 | 基金經理人 |
+|---|---|---|---:|---:|:---:|---:|---|
+| {{ advice.selected_fund.name }} | {{ advice.selected_fund.code }} | {{ advice.selected_fund.category }} | {{ advice.selected_fund.beta|round(2) }} | {{ advice.selected_fund.fee }} | {{ advice.selected_fund.currency }} | {{ advice.selected_fund.aum }} | {{ advice.selected_fund.manager }} |
 
 ---
 
-## 二、推薦理由
-{% for line in advice.explanation -%}
-- {{ line }}
-{% endfor %}
+## 二、基金價格預測 (CAPM+i.i.d. 殘差模擬)
+- P5 (10d)：{{ advice.fund_forecast.price_scenarios.P5_10d|round(2) }}
+- Median (10d)：{{ advice.fund_forecast.price_scenarios.Median_10d|round(2) }}
+- P95 (10d)：{{ advice.fund_forecast.price_scenarios.P95_10d|round(2) }}
 
-{% if advice.suitability_flags %}
-> ⚠️ **適合度提醒**  
-{% for f in advice.suitability_flags -%}
-- {{ f.code }}：{{ f.issue }}
-{% endfor %}
+{% if advice.fund_forecast.forecast_plot %}
+![基金預測圖]({{ advice.fund_forecast.forecast_plot }})
 {% endif %}
 
 ---
 
-## 三、依據與引用（RAG）
+## 三、基金持股 Beta 值
+| 股票代碼 | Beta |
+|---|---:|
+{% for t, b in advice.stock_betas.items() -%}
+| {{ t }} | {{ b|round(2) }} |
+{% endfor %}
+
+---
+
+## 四、基金持股價格預測
+{% for t, fc in advice.stock_forecasts.items() %}
+### {{ t }}
+- P5 (10d)：{{ fc.P5_10d|round(2) }}
+- Median (10d)：{{ fc.Median_10d|round(2) }}
+- P95 (10d)：{{ fc.P95_10d|round(2) }}
+
+{% if fc.forecast_plot %}
+![{{ t }} 預測圖]({{ fc.forecast_plot }})
+{% endif %}
+
+{% endfor %}
+
+---
+
+## 五、市場熱度
+- Relative Volume Score：{{ advice.market_heat.rel_volume_score|round(2) }}
+
+---
+
+## 六、推薦理由
+{% for line in advice.explanation -%}
+- {{ line }}
+{% endfor %}
+
+---
+
+## 七、依據與引用（RAG）
 {% if refs and refs.contexts %}
 {% for h in refs.contexts -%}
-- 來源：{{ h.source }}  
-  頁碼：{{ h.page or "未知" }}  
-  類型：{{ h.doc_type or "未知" }}  
-  截止日期：{{ h.asof_date or "未知" }}  
+- 來源：{{ h.source }}
+  頁碼：{{ h.page or "未知" }}
+  類型：{{ h.doc_type or "未知" }}
+  截止日期：{{ h.asof_date or "未知" }}
   摘要：{{ h.text }}
 {% endfor %}
 {% else %}
@@ -43,17 +73,12 @@
 
 ---
 
-{% if charts.price %}
-## 四、代表性基金走勢
-![走勢圖]({{ charts.price }})
-{% endif %}
-
----
-
-## 五、風險揭露與聲明
+## 八、風險揭露與聲明
 本報告為投資建議示範，僅供參考。  
 基金投資有風險，過去績效不代表未來表現。  
 建議搭配完整 KYC 與專業理財顧問諮詢。
+
+
 
 
 
