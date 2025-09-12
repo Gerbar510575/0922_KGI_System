@@ -28,4 +28,3 @@ ENV PYTHONPATH=/app
 EXPOSE 8002
 ENTRYPOINT ["/usr/bin/tini","--"]
 CMD ["uvicorn","app:app","--host","0.0.0.0","--port","8002","--workers","1","--log-level","info"]
-

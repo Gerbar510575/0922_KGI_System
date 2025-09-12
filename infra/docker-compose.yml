@@ -30,7 +30,7 @@ services:
     volumes:
       - ../apps/rag-service:/app
       - ../configs:/configs:ro
-      - ../.env:/app/.env:ro
+      #- ../.env:/app/.env:ro
       - ../chroma_db:/app/chroma_db
     depends_on:
       - redis

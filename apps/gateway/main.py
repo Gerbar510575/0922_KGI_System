@@ -54,26 +54,6 @@ async def advise(payload: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"gateway /advise error: {e}")
 
-# ----------------- Justify -----------------
-@app.post("/justify")
-async def justify(payload: dict):
-    try:
-        async with httpx.AsyncClient(timeout=30) as c:
-            resp = await c.post(f"{RAG}/search", json=payload)
-            resp.raise_for_status()
-            return resp.json()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "downstream": "rag/search",
-                "status": e.response.status_code,
-                "body": e.response.text,
-            },
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"gateway /justify error: {e}")
-
 # ----------------- Report -----------------
 @app.post("/report")
 async def report(payload: dict):

@@ -1,7 +1,8 @@
 import os, json
 import chromadb
 
-CHROMA_DIR = "./chroma_db"
+#CHROMA_DIR = "./chroma_db"
+CHROMA_DIR = "/app/chroma_db"
 DB_NAME = "funds"
 JSON_PATH = "./All_Funds_with_embeddings.json"
 

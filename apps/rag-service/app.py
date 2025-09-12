@@ -2,24 +2,52 @@
 import chromadb
 from fastapi import FastAPI
 from pydantic import BaseModel
-#from sentence_transformers import SentenceTransformer
 from google import genai
 from config import (
     CHROMA_DIR,
-    #EMBEDDING_MODEL,
+    EMBEDDING_MODEL,
     GEMINI_MODEL,
     GENAI_API_KEY,
     TOP_K,
     SHOW_CHAR,
 )
 
+# --- HuggingFace (只 import 實際需要的東西) ---
+from transformers import AutoTokenizer, AutoModel
+from torch import no_grad
+from torch.nn.functional import normalize
+
 # ---------------- Init ----------------
 app = FastAPI(title="Fund RAG API", version="1.0.0")
 
-#embed_model = SentenceTransformer(EMBEDDING_MODEL)
+CHROMA_DIR = "/app/chroma_db"
+DB_NAME = "funds"
+
+# Load HuggingFace embedding model
+tokenizer = AutoTokenizer.from_pretrained(EMBEDDING_MODEL)
+hf_model = AutoModel.from_pretrained(EMBEDDING_MODEL)
+
+# Google Gemini
 genai_client = genai.Client(api_key=GENAI_API_KEY)
+
+# ChromaDB
 chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
-db = chroma_client.get_collection("funds")
+db = chroma_client.get_collection(DB_NAME)
+
+
+# ---------------- Embedding ----------------
+def encode_query(text: str) -> list[float]:
+    """Encode query text into embedding using HuggingFace BGE-M3"""
+    text = f"query: {text}"  # 官方建議加前綴
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+
+    with no_grad():
+        outputs = hf_model(**inputs)
+        emb = outputs.last_hidden_state[:, 0, :]  # CLS token
+        emb = normalize(emb, p=2, dim=1)          # L2 normalize
+
+    return emb.squeeze(0).tolist()
+
 
 # ---------------- Request / Response ----------------
 class QueryRequest(BaseModel):
@@ -34,34 +62,12 @@ class QueryResponse(BaseModel):
 
 # ---------------- Heuristics ----------------
 CATEGORY_KEYWORDS = {
-    "prospectus_short": [
-        "費用",
-        "經理費",
-        "保管費",
-        "手續費",
-        "買回費",
-        "申購",
-        "配息",
-        "RR",
-        "風險等級",
-    ],
-    "monthly_report": [
-        "前十大",
-        "持股",
-        "產業",
-        "國家",
-        "績效",
-        "報酬",
-        "淨值",
-        "資料日期",
-        "月報",
-        "月",
-    ],
+    "prospectus_short": ["費用", "經理費", "保管費", "手續費", "買回費", "申購", "配息", "RR", "風險等級"],
+    "monthly_report": ["前十大", "持股", "產業", "國家", "績效", "報酬", "淨值", "資料日期", "月報", "月"],
 }
 
 
 def decide_doc_type_pref(q: str) -> str | None:
-    """根據 query 判斷應偏好檢索的文件類型"""
     q = q.strip().lower()
     for doc_type, keywords in CATEGORY_KEYWORDS.items():
         if any(k.lower() in q for k in keywords):
@@ -71,12 +77,9 @@ def decide_doc_type_pref(q: str) -> str | None:
 
 # ---------------- Retrieval ----------------
 def vector_search(query_vec, topk: int, doc_type: str | None = None, backend="chroma"):
-    """向量檢索，支援多 backend (目前預設 chroma)"""
     if backend == "chroma":
         where = {"doc_type": doc_type} if doc_type else None
         return db.query(query_embeddings=[query_vec], n_results=topk, where=where)
-
-    # 預留: 若要支援 qdrant，可以在這裡加
     raise ValueError(f"Unknown backend: {backend}")
 
 
@@ -95,7 +98,6 @@ ANSWER_PROMPT_TEMPLATE = """
 
 
 def synthesize_answer(context_txt: str, q: str) -> str:
-    """用 Gemini 生成答案"""
     prompt = ANSWER_PROMPT_TEMPLATE.format(context=context_txt, question=q)
     try:
         resp = genai_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
@@ -106,15 +108,13 @@ def synthesize_answer(context_txt: str, q: str) -> str:
 
 # ---------------- Main RAG ----------------
 def answer_with_rag(query_text: str, top_k: int = TOP_K, show_char: int = SHOW_CHAR):
-    """檢索 (embedding) + Gemini 生成答案"""
     if not query_text.strip():
         return "⚠️ Query is empty.", []
 
-    # Step 1. 查詢 embedding
-    q = f"query: {query_text}"
-    query_emb = embed_model.encode(q, normalize_embeddings=True).tolist()
+    # Step 1. Embedding
+    query_emb = encode_query(query_text)
 
-    # Step 2. 檢索 (有 doc_type 偏好)
+    # Step 2. Retrieval
     doc_type_pref = decide_doc_type_pref(query_text)
     raw = vector_search(query_emb, topk=top_k, doc_type=doc_type_pref, backend="chroma")
 
@@ -131,7 +131,7 @@ def answer_with_rag(query_text: str, top_k: int = TOP_K, show_char: int = SHOW_C
             }
         )
 
-    # Step 3. Prompt
+    # Step 3. Gemini Answer
     contexts = "\n".join([f"[{r['rank']}] {r['snippet']}" for r in results])
     answer = synthesize_answer(contexts, query_text)
 
@@ -141,8 +141,5 @@ def answer_with_rag(query_text: str, top_k: int = TOP_K, show_char: int = SHOW_C
 # ---------------- API Routes ----------------
 @app.post("/query", response_model=QueryResponse)
 def query_fund(request: QueryRequest):
-    """前端呼叫 API，輸入 query → 回答 + 檢索片段"""
     answer, passages = answer_with_rag(request.query, top_k=request.top_k)
     return {"answer": answer, "passages": passages}
-
-

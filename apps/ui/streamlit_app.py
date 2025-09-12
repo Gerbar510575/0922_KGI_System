@@ -140,6 +140,10 @@ with tab3:
         st.subheader("知識檢索回答 (RAG)")
         rag = st.session_state["rag"]
 
+        # Debug 印出完整 RAG 結果
+        st.write("### [DEBUG] RAG 原始 JSON")
+        st.json(rag)
+
         if rag.get("answer"):
             st.markdown(f"**AI 回答：**\n\n{rag['answer']}")
 
