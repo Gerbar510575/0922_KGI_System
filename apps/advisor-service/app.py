@@ -4,7 +4,9 @@ import pandas as pd, os, json, numpy as np, requests, math
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import io, base64
-
+from fastapi import Request
+import traceback
+from fastapi.responses import JSONResponse
 # === 初始化 FastAPI ===
 app = FastAPI(title="Advisor Service")
 
@@ -31,12 +33,12 @@ def infer_risk_via_bridge(kyc: dict) -> dict:
         prob = out.get("prob")
         if prob is not None:
             p = float(prob[0]) if isinstance(prob, list) else float(prob)
-            if p > 0.7: return {"type": "積極", "p": p}
-            if p > 0.4: return {"type": "穩健", "p": p}
+            if p > 0.5:
+                return {"type": "積極", "p": p}
             return {"type": "保守", "p": p}
     except Exception:
         pass
-    return {"type": "穩健", "p": 0.5}
+    return {"type": "保守", "p": 0.5} # 預設值調整為「保守」
 
 # ---------------------------------------------------
 # Service: Data Loader
@@ -271,25 +273,45 @@ def advise(payload: dict):
     stock_betas = compute_stock_betas(daily_return)
     fund_betas = compute_fund_betas(holdings_map, stock_betas)
 
+    # --- 新的邏輯開始 ---
     target_high = (p_value > 0.5)
-    selected_fund, selected_beta = None, None
+    qualified_funds = []
+    
+    # 步驟一：找出所有符合風險邏輯的基金
     for fc, b in fund_betas.items():
-        if target_high and b > 1:
-            selected_fund, selected_beta = fc, b; break
-        if not target_high and b < 1:
-            selected_fund, selected_beta = fc, b; break
-    if not selected_fund:
-        raise HTTPException(status_code=404, detail="沒有符合風險邏輯的基金")
+        if (target_high and b > 1) or (not target_high and b < 1):
+            qualified_funds.append(fc)
 
-    # 市場熱度
-    fund_heat = {}
+    if not qualified_funds:
+        raise HTTPException(status_code=404, detail="沒有符合風險邏輯的基金")
+    
+    # 步驟二：一次性查詢所有符合基金的市場熱度
+    fund_heat_data = {}
     try:
-        resp = requests.post(f"{MKT}/fund_heat",
-                             json={"fund_codes": [selected_fund]},
-                             timeout=20)
-        fund_heat = resp.json().get("data", {}).get(selected_fund, {})
-    except:
+        resp = requests.post(
+            f"{MKT}/fund_heat",
+            json={"fund_codes": qualified_funds},
+            timeout=20
+        )
+        resp.raise_for_status()
+        fund_heat_data = resp.json().get("data", {})
+    except requests.exceptions.RequestException:
         pass
+    
+    # 步驟三：從符合條件的基金中，找出市場熱度最高的那個
+    selected_fund, max_heat = None, -1
+    for fc in qualified_funds:
+        heat = fund_heat_data.get(fc, {}).get("heat", 0)
+        if heat > max_heat:
+            max_heat = heat
+            selected_fund = fc
+            
+    if not selected_fund:
+        # 如果API調用失敗或沒有熱度數據，則回到原始邏輯選第一個符合的
+        selected_fund = qualified_funds[0]
+
+    selected_beta = fund_betas.get(selected_fund)
+    # --- 新的邏輯結束 ---
 
     # 基金基本資料
     fmeta = funds[funds["code"] == selected_fund].iloc[0].to_dict()
@@ -305,7 +327,7 @@ def advise(payload: dict):
         "fund_forecast": fund_forecast,
         "stock_betas": {t: stock_betas.get(t, 0.0) for t in holdings_map[selected_fund].keys()},
         "stock_forecasts": stock_forecasts,
-        "market_heat": fund_heat
+        "market_heat": fund_heat_data.get(selected_fund, {})   # ✅ 修正
     }
     return result
 
@@ -320,7 +342,14 @@ def forecast_stock(payload: dict):
     stock_forecast = forecast_stock_with_plot(ticker, daily_return)
     return {"stock_forecast": stock_forecast}
 
-
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print("❌ 捕獲到未處理錯誤:")
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)}
+    )
 
 
 

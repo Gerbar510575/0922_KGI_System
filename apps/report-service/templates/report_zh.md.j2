@@ -11,7 +11,7 @@
 
 ---
 
-## 二、基金價格預測 (CAPM+i.i.d. 殘差模擬)
+## 二、基金價格預測
 - P5 (10d)：{{ advice.fund_forecast.price_scenarios.P5_10d|round(2) }}
 - Median (10d)：{{ advice.fund_forecast.price_scenarios.Median_10d|round(2) }}
 - P95 (10d)：{{ advice.fund_forecast.price_scenarios.P95_10d|round(2) }}
@@ -37,11 +37,9 @@
 - P5 (10d)：{{ fc.P5_10d|round(2) }}
 - Median (10d)：{{ fc.Median_10d|round(2) }}
 - P95 (10d)：{{ fc.P95_10d|round(2) }}
-
 {% if fc.forecast_plot %}
 ![{{ t }} 預測圖]({{ fc.forecast_plot }})
 {% endif %}
-
 {% endfor %}
 
 ---
@@ -61,11 +59,14 @@
 ## 七、依據與引用（RAG）
 {% if refs and refs.contexts %}
 {% for h in refs.contexts -%}
-- 來源：{{ h.source }}
-  頁碼：{{ h.page or "未知" }}
-  類型：{{ h.doc_type or "未知" }}
-  截止日期：{{ h.asof_date or "未知" }}
-  摘要：{{ h.text }}
+- 基金代碼：{{ h.metadata.fund_code }}
+  基金名稱：{{ h.metadata.fund_name }}
+  類型：{{ h.metadata.doc_type }}
+  截止日期：{{ h.metadata.asof_date or "未知" }}
+  章節：{{ h.metadata.section or "未知" }}
+  頁碼：{{ h.metadata.page or "未知" }}
+  來源檔案：{{ h.metadata.source }}
+  摘要：{{ h.snippet }}
 {% endfor %}
 {% else %}
 - (無引用內容)
@@ -77,6 +78,7 @@
 本報告為投資建議示範，僅供參考。  
 基金投資有風險，過去績效不代表未來表現。  
 建議搭配完整 KYC 與專業理財顧問諮詢。
+
 
 
 

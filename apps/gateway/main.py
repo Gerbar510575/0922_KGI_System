@@ -15,7 +15,7 @@ def health():
     return {"ok": True}
 
 # ----------------- RAG /auto -----------------
-@app.post("/rag/auto")
+@app.post("/query")
 async def rag_auto(payload: dict):
     try:
         async with httpx.AsyncClient(timeout=60) as c:

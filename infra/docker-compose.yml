@@ -28,14 +28,15 @@ services:
     environment:
       USER_AGENT: "kfh-rag/1.0"
     volumes:
-      - ../apps/rag-service:/app
+      - ..:/app
       - ../configs:/configs:ro
-      #- ../.env:/app/.env:ro
       - ../chroma_db:/app/chroma_db
+      - ../hf_cache/hub:/root/.cache/huggingface/hub
     depends_on:
       - redis
     ports:
       - "8002:8002"
+    command: uvicorn apps.rag-service.app:app --host 0.0.0.0 --port 8002
 
   gateway:
     build:
