@@ -47,7 +47,7 @@ def get_daily_returns(tickers: list) -> pd.DataFrame:
     try:
         resp = requests.post(
             f"{MKT}/history",
-            json={"tickers": tickers, "days": 90},
+            json={"tickers": tickers, "days": 22},
             timeout=30
         )
         resp.raise_for_status()

@@ -1,31 +1,34 @@
 import os
 import re
+import json
 import chromadb
 from fastapi import FastAPI
 from pydantic import BaseModel
 from google import genai
 from google.genai import types
 from google.api_core import retry
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 
 # ---------------- Paths ----------------
 CHROMA_DIR = os.getenv("CHROMA_DIR", "/app/chroma_db")
 DB_NAME    = os.getenv("DB_NAME", "funds")
 
 # ---------------- Models ----------------
-GEMINI_MODEL    = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-GENAI_API_KEY   = os.getenv("GENAI_API_KEY", "")
+GEMINI_MODEL  = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GENAI_API_KEY = os.getenv("GENAI_API_KEY", "")
+EMBED_MODEL   = os.getenv("EMBED_MODEL", "models/gemini-embedding-001")
 
 # ---------------- Retrieval Defaults ----------------
-TOP_K     = int(os.getenv("TOP_K", 5))
-SHOW_CHAR = int(os.getenv("SHOW_CHAR", 200))
+TOP_K     = int(os.getenv("TOP_K", 8))
+SHOW_CHAR = int(os.getenv("SHOW_CHAR", 320))
+MAX_STRUCTURED_PAIRS = int(os.getenv("MAX_STRUCTURED_PAIRS", 60))
+MAX_PAIRS_PER_DOC    = int(os.getenv("MAX_PAIRS_PER_DOC", 20))
 
 # ---------------- Init ----------------
-app = FastAPI(title="Fund RAG API", version="4.0.0")
+app = FastAPI(title="Fund RAG API (content-only embed + structured answer)", version="6.2.0")
 
 # ---------------- Google Gemini Client ----------------
 genai_client = genai.Client(api_key=GENAI_API_KEY)
-EMBED_MODEL = "models/gemini-embedding-001"
 
 # ---------------- Embedding Function ----------------
 is_retriable = lambda e: (
@@ -68,7 +71,7 @@ class QueryRequest(BaseModel):
     query: str
     top_k: int = TOP_K
     fund_code: Optional[str] = None
-    doc_type: Optional[str] = None  # "月報" or "公開說明書"
+    doc_type: Optional[str] = None
 
 class QueryResponse(BaseModel):
     answer: str
@@ -79,9 +82,10 @@ FUND_RE  = re.compile(r"\bG0\d{2}\b", re.IGNORECASE)
 MONTH_RE = re.compile(r"(20\d{2})[-/年]?(0?[1-9]|1[0-2])")
 
 DOC_TYPE_HINTS = {
-    "月報": ["月報", "七月", "八月", "前十大", "持股", "產業", "地區", "績效", "報酬"],
-    "公開說明書": ["公開說明書", "簡式", "費用", "經理費", "保管費", "手續費", "RR", "風險等級", "投資範圍"],
+    "月報": ["月報", "持股", "產業", "績效", "規模"],
+    "公開說明書": ["公開說明書", "簡式", "費用", "經理費", "保管費", "RR", "投資範圍"],
 }
+FEES_KWS = ["費用", "經理費", "保管費", "手續費", "申購", "贖回"]
 
 def decide_doc_type(q: str) -> str | None:
     s = q.strip().lower()
@@ -93,19 +97,16 @@ def decide_doc_type(q: str) -> str | None:
 def build_where_clause(query: str, override: Optional[str] = None) -> Dict[str, Any] | None:
     where: Dict[str, Any] = {}
 
-    # fund_code
     m = FUND_RE.search(query)
     if m:
         where["fund_code"] = {"$eq": m.group(0).upper()}
 
-    # asof_date
     m = MONTH_RE.search(query)
     if m:
         y, mo = m.group(1), m.group(2).zfill(2)
         ym = f"{y}-{mo}"
         where["asof_date"] = {"$contains": ym}
 
-    # doc_type
     dt = override or decide_doc_type(query)
     if dt:
         where["doc_type"] = {"$eq": dt}
@@ -116,49 +117,88 @@ def build_where_clause(query: str, override: Optional[str] = None) -> Dict[str, 
 def vector_search(query_vec, topk: int, where: dict | None = None):
     return db.query(query_embeddings=[query_vec], n_results=topk, where=where)
 
+# ---------------- Structured Extract ----------------
+JSONISH_SUFFIX = "_json"
+CORE_ID_KEYS = {"fund_code", "fund_name", "doc_type", "asof_date"}
+SKIP_KEYS = {"content"}
+
+def parse_jsonish(v: str):
+    try:
+        return json.loads(v)
+    except Exception:
+        return None
+
+def is_long_text(v: str, limit: int = 400) -> bool:
+    return isinstance(v, str) and len(v) > limit
+
+def label_from_meta(m: dict) -> str:
+    return f"({m.get('fund_code','?')}, {m.get('fund_name','?')}, {m.get('doc_type','?')}, {m.get('asof_date','?')})"
+
+def kv_pairs_from_meta(m: dict, limit_pairs: int) -> List[Tuple[str, str]]:
+    pairs: List[Tuple[str, str]] = []
+    for k, v in m.items():
+        if k in CORE_ID_KEYS or k in SKIP_KEYS:
+            continue
+        if not v:
+            continue
+        s = str(v)
+        if not is_long_text(s):
+            pairs.append((k, s))
+    return pairs[:limit_pairs]
+
+def extract_structured_block(results: list[dict]) -> str:
+    lines: List[str] = []
+    total = 0
+    for r in results:
+        m = r["metadata"]
+        label = label_from_meta(m)
+        kvs = kv_pairs_from_meta(m, MAX_PAIRS_PER_DOC)
+        for k, v in kvs:
+            lines.append(f"- {k}：{v} 【來源：{label}】")
+            total += 1
+            if total >= MAX_STRUCTURED_PAIRS:
+                return "\n".join(lines)
+    return "\n".join(lines)
+
 # ---------------- Answer synthesize ----------------
 ANSWER_PROMPT_TEMPLATE = """
-請只根據提供的脈絡回答用戶問題，並在每一條重點後加上【來源】，包含
-(fund_code, fund_name, doc_type, asof_date)。
-若脈絡不足請明確說不知道，不要臆測。
+你是一位基金文件助理。請根據提供的脈絡回答用戶問題，
+**用條列式、摘要化**輸出，避免逐條 dump 所有資料。
+每個回答重點後加上【來源：(fund_code, fund_name, doc_type, asof_date)】。
 
-脈絡：
+規則：
+1. 若有「結構化欄位」，優先使用其中的數據。
+2. 避免重複相同內容。
+3. 整理成對一般投資人可讀的摘要。
+4. 若脈絡不足請回答「不知道」。
+
+結構化欄位（若有）：  
+{structured}
+
+脈絡摘錄（僅供補充）：  
 {context}
 
 問題：{question}
 
-回答（條列式）：
+回答（條列式摘要）：  
 """
 
-def synthesize_answer(context_txt: str, q: str) -> str:
-    prompt = ANSWER_PROMPT_TEMPLATE.format(context=context_txt, question=q)
-    try:
-        resp = genai_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-        return (resp.text or "").strip()
-    except Exception as e:
-        return f"(⚠️ generation failed: {e})"
+def synthesize_answer(context_txt: str, q: str, structured: str = "") -> str:
+    prompt = ANSWER_PROMPT_TEMPLATE.format(context=context_txt, question=q, structured=structured)
+    resp = genai_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+    return (resp.text or "").strip()
 
 # ---------------- Main RAG ----------------
-def answer_with_rag(query_text: str, top_k: int = TOP_K, show_char: int = SHOW_CHAR, fund_code: str | None = None, doc_type: str | None = None):
+def answer_with_rag(query_text: str, top_k: int = TOP_K, show_char: int = SHOW_CHAR,
+                    fund_code: str | None = None, doc_type: str | None = None):
     if not query_text.strip():
         return "⚠️ Query is empty.", []
 
-    # where 條件 (支援多欄位 AND)
-    clauses = []
-    base_where = build_where_clause(query_text, override=doc_type)
-    if base_where:
-        clauses.append(base_where)
+    where = build_where_clause(query_text, override=doc_type)
     if fund_code:
-        clauses.append({"fund_code": {"$eq": fund_code}})
+        where = {"$and": [where or {}, {"fund_code": {"$eq": fund_code}}]} if where else {"fund_code": {"$eq": fund_code}}
     if doc_type:
-        clauses.append({"doc_type": {"$eq": doc_type}})
-
-    if len(clauses) == 1:
-        where = clauses[0]
-    elif len(clauses) > 1:
-        where = {"$and": clauses}
-    else:
-        where = None
+        where = {"$and": [where or {}, {"doc_type": {"$eq": doc_type}}]} if where else {"doc_type": {"$eq": doc_type}}
 
     # Step 1. Embedding
     query_emb = encode_query(query_text)
@@ -171,39 +211,34 @@ def answer_with_rag(query_text: str, top_k: int = TOP_K, show_char: int = SHOW_C
         for i in range(len(raw["ids"][0])):
             similarity = 1 - raw["distances"][0][i]
             meta = raw["metadatas"][0][i]
-            snippet = raw["documents"][0][i][:show_char] + ("..." if len(raw["documents"][0][i]) > show_char else "")
-            results.append(
-                {
-                    "rank": i + 1,
-                    "id": raw["ids"][0][i],
-                    "similarity": round(similarity, 4),
-                    "metadata": meta,
-                    "snippet": snippet,
-                }
-            )
+            doc = raw["documents"][0][i]
+            snippet = doc[:show_char] + ("..." if len(doc) > show_char else "")
+            results.append({
+                "rank": i + 1,
+                "id": raw["ids"][0][i],
+                "similarity": round(similarity, 4),
+                "metadata": meta,
+                "snippet": snippet,
+            })
 
-    # Step 3. Gemini Answer
-    def _label(m: dict) -> str:
-        return f"[{m.get('fund_code','?')} {m.get('fund_name','?')} {m.get('doc_type','?')} {m.get('asof_date','?')}]"
-
-    contexts = "\n".join([f"{_label(r['metadata'])} {r['snippet']}" for r in results])
-    answer = synthesize_answer(contexts, query_text)
+    structured_block = extract_structured_block(results)
+    contexts = "\n".join([f"[{r['metadata'].get('fund_code','?')}] {r['snippet']}" for r in results])
+    answer = synthesize_answer(contexts, query_text, structured=structured_block)
 
     return answer, results
 
 # ---------------- API Routes ----------------
 @app.post("/query", response_model=QueryResponse)
 def query_fund(request: QueryRequest):
-    answer, passages = answer_with_rag(
-        request.query,
-        top_k=request.top_k,
-        fund_code=request.fund_code,
-        doc_type=request.doc_type,
-    )
+    answer, passages = answer_with_rag(request.query, top_k=request.top_k,
+                                       fund_code=request.fund_code, doc_type=request.doc_type)
     return {"answer": answer, "passages": passages}
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+
 
 
