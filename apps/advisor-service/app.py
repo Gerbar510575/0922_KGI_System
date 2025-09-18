@@ -7,6 +7,9 @@ import io, base64
 from fastapi import Request
 import traceback
 from fastapi.responses import JSONResponse
+import matplotlib
+import matplotlib.font_manager as fm
+
 # === 初始化 FastAPI ===
 app = FastAPI(title="Advisor Service")
 
@@ -18,14 +21,55 @@ funds = pd.read_csv(FUNDS_PATH)
 MKT = os.getenv("MKT_URL", "http://market:8005")
 MLB = os.getenv("ML_BRIDGE_URL", "http://ml-bridge:7000")
 
+# ---------------- 自動尋找中文字型 ----------------
+def set_chinese_font():
+    import matplotlib.font_manager as fm
+    font_candidates = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux (apt 安裝的路徑)
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"
+    ]
+    for font_path in font_candidates:
+        if os.path.exists(font_path):
+            zh_font = fm.FontProperties(fname=font_path)
+            matplotlib.rcParams["font.family"] = zh_font.get_name()
+            print(f"✅ 使用中文字型: {zh_font.get_name()}")
+            return zh_font
+    print("⚠️ 找不到中文字型，中文可能亂碼")
+    return None
+zh_font = set_chinese_font()
+
 # ---------------------------------------------------
 # Service: Risk
 # ---------------------------------------------------
-def infer_risk_via_bridge(kyc: dict) -> dict:
+def infer_risk_via_bridge(kyc: dict) -> tuple[dict, dict]:
+    # 模型需要的欄位
+    required_fields = {
+        "Gender": "Male",
+        "Married": "No",
+        "Dependents": "3+",
+        "Education": "Graduate",
+        "Self_Employed": "No",
+        "ApplicantIncome": 0,
+        "CoapplicantIncome": 0,
+        "Property_Area": "Urban"
+    }
+
+    # 建立完整輸入
+    input_data = {}
+    for k, default in required_fields.items():
+        val = kyc.get(k, default)
+        if k in ["ApplicantIncome", "CoapplicantIncome"]:
+            try:
+                val = float(val)
+            except Exception:
+                val = default
+        input_data[k] = val
+
+    risk_result = {"type": "低風險承受度族群", "p": 0.5}  # 預設
     try:
         resp = requests.post(
             f"{MLB}/predict",
-            json={"model_id": "risk_r", "input": kyc},
+            json={"model_id": "risk_r", "input": input_data},
             timeout=20
         )
         resp.raise_for_status()
@@ -33,12 +77,11 @@ def infer_risk_via_bridge(kyc: dict) -> dict:
         prob = out.get("prob")
         if prob is not None:
             p = float(prob[0]) if isinstance(prob, list) else float(prob)
-            if p > 0.5:
-                return {"type": "積極", "p": p}
-            return {"type": "保守", "p": p}
+            risk_result = {"type": "高風險承受度族群" if p > 0.6 else "低風險承受度族群", "p": p}
     except Exception:
         pass
-    return {"type": "保守", "p": 0.5} # 預設值調整為「保守」
+
+    return risk_result, input_data
 
 # ---------------------------------------------------
 # Service: Data Loader
@@ -145,15 +188,28 @@ def simulate_stock_paths_iid(alpha, beta, expected_market_excess, residuals: np.
 # 視覺化 & 預測包裝
 # ---------------------------------------------------
 def plot_forecast_with_paths(title: str, horizon: int, simulated_paths: np.ndarray) -> str:
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(6, 3))
     k = min(50, simulated_paths.shape[0])
     plt.plot(simulated_paths[:k].T, color="grey", alpha=0.3)
-    plt.plot(range(horizon+1), np.median(simulated_paths, axis=0), lw=2, label="Median")
     plt.plot(range(horizon+1), np.percentile(simulated_paths, 5, axis=0), lw=2, ls="--", label="5%")
+    plt.plot(range(horizon+1), np.median(simulated_paths, axis=0), lw=2, label="50%")
     plt.plot(range(horizon+1), np.percentile(simulated_paths, 95, axis=0), lw=2, ls="--", label="95%")
-    plt.title(title); plt.xlabel("Days Ahead"); plt.ylabel("Price"); plt.legend()
-    buf = io.BytesIO(); plt.savefig(buf, format="png", bbox_inches="tight"); plt.close()
+
+    if zh_font:
+        plt.title(title, fontproperties=zh_font)
+        plt.xlabel("幾天後", fontproperties=zh_font)
+        plt.ylabel("價格", fontproperties=zh_font)
+    else:
+        plt.title(title)
+        plt.xlabel("幾天後")
+        plt.ylabel("價格")
+
+    plt.legend()
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight")
+    plt.close()
     return base64.b64encode(buf.getvalue()).decode("utf-8")
+
 
 def forecast_stock_with_plot(ticker: str, daily_return: pd.DataFrame,
                              horizon: int = 10, n_sim: int = 1000):
@@ -181,7 +237,7 @@ def forecast_stock_with_plot(ticker: str, daily_return: pd.DataFrame,
         return {"ticker": ticker, "error": f"simulate failed: {e}"}
 
     # 圖與分位數
-    img = plot_forecast_with_paths(f"Stock {ticker} Forecast (CAPM+i.i.d., {horizon}d)", horizon, paths)
+    img = plot_forecast_with_paths(f"Stock {ticker} 預測 ({horizon}d)", horizon, paths)
     last_prices = paths[:, -1]
 
         # ===== Debug 印出 =====
@@ -200,6 +256,7 @@ def forecast_stock_with_plot(ticker: str, daily_return: pd.DataFrame,
     }
 
 def forecast_fund_with_plot(fund_code: str, holdings_map: dict, daily_return: pd.DataFrame,
+                            fund_name: str = None,
                             horizon: int = 10, n_sim: int = 1000):
     tickers = list(holdings_map[fund_code].keys())
     weights = np.array(list(holdings_map[fund_code].values()), dtype=float)
@@ -231,23 +288,16 @@ def forecast_fund_with_plot(fund_code: str, holdings_map: dict, daily_return: pd
             continue
 
     if not stock_paths:
-        return {"fund_code": fund_code, "error": "基金沒有可用股票模擬"}
+        return {"fund_name": fund_name or fund_code, "error": "基金沒有可用股票模擬"}
 
     # 基金層級價格路徑 = 權重 * 個股模擬價格 的加總
     fund_paths = np.sum(stock_paths, axis=0)
 
-    img = plot_forecast_with_paths(f"Fund {fund_code} Forecast (CAPM+i.i.d., {horizon}d)", horizon, fund_paths)
+    img = plot_forecast_with_paths(f"{fund_name or fund_code} 價格預測圖 ({horizon}日)", horizon, fund_paths)
     last_prices = fund_paths[:, -1]
 
-    print(f"[DEBUG] Fund {fund_code} 模擬最後價 last_prices: {last_prices[:10]}")
-    print(f"[DEBUG] Fund {fund_code} 分位數: "
-          f"P5={np.percentile(last_prices, 5)}, "
-          f"Median={np.percentile(last_prices, 50)}, "
-          f"P95={np.percentile(last_prices, 95)}")
-
-
     return {
-        "fund_code": fund_code,
+        "fund_name": fund_name or fund_code,
         "price_scenarios": {
             f"P5_{horizon}d": float(np.percentile(last_prices, 5)),
             f"Median_{horizon}d": float(np.percentile(last_prices, 50)),
@@ -262,7 +312,7 @@ def forecast_fund_with_plot(fund_code: str, holdings_map: dict, daily_return: pd
 @app.post("/advise")
 def advise(payload: dict):
     kyc = payload.get("kyc", {})
-    risk_info = infer_risk_via_bridge(kyc)
+    risk_info, final_input = infer_risk_via_bridge(kyc)
     p_value = risk_info["p"]
 
     holdings_map = json.load(open(HOLDINGS_PATH, "r", encoding="utf-8"))
@@ -273,19 +323,18 @@ def advise(payload: dict):
     stock_betas = compute_stock_betas(daily_return)
     fund_betas = compute_fund_betas(holdings_map, stock_betas)
 
-    # --- 新的邏輯開始 ---
-    target_high = (p_value > 0.5)
+    target_high = (p_value > 0.6)
     qualified_funds = []
-    
-    # 步驟一：找出所有符合風險邏輯的基金
+
+    # 步驟一：風險篩選
     for fc, b in fund_betas.items():
         if (target_high and b > 1) or (not target_high and b < 1):
             qualified_funds.append(fc)
 
     if not qualified_funds:
         raise HTTPException(status_code=404, detail="沒有符合風險邏輯的基金")
-    
-    # 步驟二：一次性查詢所有符合基金的市場熱度
+
+    # 步驟二：查詢基金熱度
     fund_heat_data = {}
     try:
         resp = requests.post(
@@ -297,39 +346,47 @@ def advise(payload: dict):
         fund_heat_data = resp.json().get("data", {})
     except requests.exceptions.RequestException:
         pass
-    
-    # 步驟三：從符合條件的基金中，找出市場熱度最高的那個
+
+    # 步驟三：挑選熱度最高
     selected_fund, max_heat = None, -1
     for fc in qualified_funds:
-        heat = fund_heat_data.get(fc, {}).get("heat", 0)
+        heat = fund_heat_data.get(fc, {}).get("rel_volume_score", 0)
         if heat > max_heat:
             max_heat = heat
             selected_fund = fc
-            
+
     if not selected_fund:
-        # 如果API調用失敗或沒有熱度數據，則回到原始邏輯選第一個符合的
         selected_fund = qualified_funds[0]
 
     selected_beta = fund_betas.get(selected_fund)
-    # --- 新的邏輯結束 ---
 
     # 基金基本資料
     fmeta = funds[funds["code"] == selected_fund].iloc[0].to_dict()
     fmeta["beta"] = selected_beta
-
+    
     # 預測（CAPM + i.i.d. 殘差）
-    fund_forecast = forecast_fund_with_plot(selected_fund, holdings_map, daily_return)
-    stock_forecasts = {t: forecast_stock_with_plot(t, daily_return)
-                       for t in holdings_map[selected_fund].keys()}
+    fund_forecast = forecast_fund_with_plot(selected_fund, holdings_map, daily_return, fund_name=fmeta.get("name"))
+    #stock_forecasts = {t: forecast_stock_with_plot(t, daily_return)
+                       #for t in holdings_map[selected_fund].keys()}
 
     result = {
         "selected_fund": fmeta,
         "fund_forecast": fund_forecast,
-        "stock_betas": {t: stock_betas.get(t, 0.0) for t in holdings_map[selected_fund].keys()},
-        "stock_forecasts": stock_forecasts,
-        "market_heat": fund_heat_data.get(selected_fund, {})   # ✅ 修正
+        #"stock_betas": {t: stock_betas.get(t, 0.0) for t in holdings_map[selected_fund].keys()},
+        #"stock_forecasts": stock_forecasts,
+        #"market_heat": fund_heat_data.get(selected_fund, {}),
+        # 新增：完整四階段的 debug 資料
+        "debug_info": {
+            "all_fund_betas": fund_betas,          # 所有基金的 Beta
+            "qualified_funds": qualified_funds,    # 風險篩選後的基金池
+            "fund_heat_data": fund_heat_data,      # 各基金的熱度
+            "risk_type": risk_info["type"],        # 客戶風險屬性（積極 / 保守）
+            "risk_score": p_value,                 # 模型輸出的分數
+            "risk_input": final_input              # 實際傳給 R 模型的輸入
+        }
     }
     return result
+
 
 @app.post("/forecast_stock")
 def forecast_stock(payload: dict):
@@ -350,6 +407,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": str(exc)}
     )
+
 
 
 

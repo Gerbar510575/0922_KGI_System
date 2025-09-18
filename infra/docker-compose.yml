@@ -9,6 +9,7 @@ services:
       SUBPROC_TIMEOUT: 15
     volumes:
       - ../apps/ml-bridge:/app
+      - C:/Users/gerbar/Desktop/0922_KGI/apps/ml-bridge/models/r/crisis_model_bundle.rds:/app/models/r/crisis_model_bundle.rds:ro
     ports:
       - "7000:7000"
 

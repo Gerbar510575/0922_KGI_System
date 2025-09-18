@@ -5,6 +5,11 @@ library(themis)   # SMOTE
 library(vip)
 library(knitr)
 library(kableExtra)
+#library(jsonlite)
+#library(workflows)
+#library(parsnip)
+#library(hardhat)
+#library(glmnet)
 set.seed(123)
 
 # --- 讀取資料 ---
@@ -194,19 +199,22 @@ ggplot(top_features, aes(x = reorder(feature, abs(coef)), y = coef, fill = coef 
   scale_fill_manual(values = c("TRUE" = "steelblue", "FALSE" = "tomato")) +
   theme_minimal(base_size = 14)
 
-ggsave("危機預測LASSO模型 - 重要特徵前 20 名.png", plot, width = 8, height = 6, dpi = 300)
+#ggsave("危機預測LASSO模型 - 重要特徵前 20 名.png", plot, width = 8, height = 6, dpi = 300)
 
 # =========================
 # 12) 存檔 (供 API 使用)
 # =========================
+# --- fit 完之後，抽出已訓練的 workflow
+trained_wf <- final_wf %>% fit(data = train_df)
+
 model_bundle <- list(
-  workflow   = final_fit,          # 已訓練好的 workflow
-  threshold  = best_thresh,        # 選定的門檻 (例如 Cost-sensitive)
-  method     = chosen_method,      # 使用的 Method 名稱
+  workflow   = trained_wf,          # 這樣 workflow 裡確定包含 fitted model
+  threshold  = best_thresh,
+  method     = chosen_method,
   trained_levels = list(
-    outcome_levels = levels(train_df[[target]]) # 記錄因變數 levels (N / Y)
+    outcome_levels = levels(train_df[[target]])
   ),
-  timestamp = Sys.time()           # 存檔時間
+  timestamp = Sys.time()
 )
 
 saveRDS(model_bundle, file = "crisis_model_bundle.rds")

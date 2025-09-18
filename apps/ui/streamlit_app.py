@@ -7,6 +7,10 @@ import streamlit as st
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import json
+
+# ---------------- 頁面設定 (必須最先呼叫一次) ----------------
+st.set_page_config(page_title="KGI 個人化 AI 投資建議系統", layout="wide")
 
 # ---------------- 自動尋找中文字型 ----------------
 try:
@@ -16,330 +20,404 @@ try:
     if os.path.exists(font_path):
         zh_font = fm.FontProperties(fname=font_path)
         matplotlib.rcParams["font.family"] = zh_font.get_name()
-        print(f"✅ 使用中文字型: {zh_font.get_name()}")
-    else:
-        print("⚠️ 找不到 NotoSansCJK-Regular.ttc，仍使用預設字型")
-except Exception as e:
-    print(f"⚠️ 設定中文字型失敗: {e}")
+except Exception:
+    pass
+
+# ---------------- Streamlit Theme Style ----------------
+st.markdown("""
+    <style>
+    html, body, [class*="css"]  {
+        font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+    }
+    .big-title {
+        color: #004B97;
+        font-size: 32px;
+        font-weight: bold;
+    }
+    .section-header {
+        color: #004B97;
+        font-size: 24px;
+        font-weight: 600;
+        margin-top: 20px;
+        margin-bottom: 10px;
+    }
+    .sub-header {
+        color: #0070C0;
+        font-size: 20px;
+        font-weight: 500;
+        margin-top: 15px;
+        margin-bottom: 5px;
+    }
+    thead tr th {
+        background-color: #004B97;
+        color: white !important;
+    }
+    .q-card {
+        background-color: #F0F0F0;
+        border-radius: 10px;
+        padding: 12px;
+        margin-top: 10px;
+        margin-bottom: 5px;
+        color: #000000;
+        font-weight: 500;
+    }
+    .rag-card {
+        background-color: #F8FBFF;
+        border: 2px solid #004B97;
+        border-radius: 10px;
+        padding: 15px;
+        margin-top: 5px;
+        margin-bottom: 20px;
+        color: #000000;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # ---------------- 工具函式 ----------------
 def save_fig_to_session(fig, key, close=True):
     if fig is None:
         return
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=160, bbox_inches="tight")
     buf.seek(0)
     b64 = base64.b64encode(buf.getvalue()).decode()
     st.session_state.setdefault("charts", {})[key] = b64
     if close:
         plt.close(fig)
 
-def save_external_image_to_session(data_url_or_b64, key):
-    if not data_url_or_b64:
-        return
-    if isinstance(data_url_or_b64, str) and data_url_or_b64.startswith("data:image"):
-        try:
-            data_url_or_b64 = data_url_or_b64.split(",", 1)[1]
-        except Exception:
-            pass
-    st.session_state.setdefault("charts", {})[key] = data_url_or_b64
+def color_perf(val):
+    try:
+        v = float(str(val).replace("%",""))
+        if v > 0: return "color: green"
+        if v < 0: return "color: red"
+    except:
+        return ""
+    return ""
 
 # ---------------- 基本設定 ----------------
 GATE = os.getenv("GATEWAY_URL", "http://localhost:8000")
 CSV_PATH = os.getenv("TRAIN_CSV_PATH", "train.csv")
+JSON_PATH = os.getenv("TRAIN_JSON_PATH", "/app/data/metadata_all_chunked_para.json")
 
 if os.path.exists(CSV_PATH):
     df = pd.read_csv(CSV_PATH)
-else:
-    df = pd.DataFrame({
-        "Gender": ["Male", "Female"],
-        "Married": ["Yes", "No"],
-        "Dependents": ["0", "1", "2", "3+"],
-        "Education": ["Graduate", "Not Graduate"],
-        "Self_Employed": ["Yes", "No"],
-        "Property_Area": ["Urban", "Rural", "Semiurban"],
-    })
 
+# ---------------- Normalize 工具 ----------------
+def normalize_perf_keys(perf_dict: dict) -> dict:
+    if not perf_dict:
+        return {}
+    mapping = {
+        "新台幣A": "新台幣A", "新台幣A級": "新台幣A", "新臺幣A": "新台幣A", "新臺幣A級": "新台幣A",
+        "美元A": "美元A", "美元A級": "美元A",
+        "人民幣A": "人民幣A", "人民幣A級": "人民幣A",
+        "南非幣A": "南非幣A", "南非幣A級": "南非幣A"
+    }
+    normalized = {}
+    for k, v in perf_dict.items():
+        key = mapping.get(k, k)
+        normalized[key] = v
+    return normalized
+
+# ---------------- 載入基金績效 JSON ----------------
+fund_perf_data = {}
+if os.path.exists(JSON_PATH):
+    try:
+        with open(JSON_PATH, "r", encoding="utf-8") as f:
+            json_raw = json.load(f)
+        for entry in json_raw:
+            meta = entry.get("metadata", {})
+            if meta.get("doc_type") == "月報":
+                code = (meta.get("fund_code") or "").strip()
+                perf = meta.get("performance") or entry.get("performance")
+                if code and perf:
+                    fund_perf_data[code] = normalize_perf_keys(perf)
+    except Exception as e:
+        st.warning(f"⚠️ 無法讀取績效 JSON: {e}")
+
+# ---------------- 下拉選單選項 ----------------
 gender_opts = df["Gender"].dropna().unique().tolist()
 married_opts = df["Married"].dropna().unique().tolist()
 dependents_opts = df["Dependents"].dropna().unique().tolist()
 education_opts = df["Education"].dropna().unique().tolist()
 self_emp_opts = df["Self_Employed"].dropna().unique().tolist()
 property_opts = df["Property_Area"].dropna().unique().tolist()
+product_opts = ["美國股票型基金", "非投資等級債券型基金", "海外債券型基金", "保險商品"]
 
-st.set_page_config(page_title="KGI 個人化 AI 投資建議系統", layout="wide")
-st.title("KGI 個人化 AI 投資建議系統")
+fund_name_map_full = {
+    "G006": "凱基雲端趨勢基金",
+    "G011": "凱基醫院及長照產業基金",
+    "G012": "凱基環球趨勢基金",
+    "G013": "凱基未來移動基金",
+}
+fund_name_map_short = {
+    "G006": "雲端趨勢",
+    "G011": "醫院長照",
+    "G012": "環球趨勢",
+    "G013": "未來移動",
+}
 
-tab1, tab2, tab3 = st.tabs(["請填寫您的個人資料", "個人化 AI 建議基金", "知識檢索與報告"])
+# ---------------- UI ----------------
+st.markdown('<div class="big-title">💡 KGI 個人化 AI 投資建議系統</div>', unsafe_allow_html=True)
 
-# --- Tab1 ---
-with tab1:
-    with st.form("kyc_form"):
-        name = st.text_input("姓名", "GB")
-        gender = st.selectbox("性別", gender_opts)
-        married = st.selectbox("婚姻狀態", married_opts)
-        dependents = st.selectbox("扶養人數", dependents_opts)
-        education = st.selectbox("教育程度", education_opts)
-        self_emp = st.selectbox("是否自僱", self_emp_opts)
-        property_area = st.selectbox("房地產區域", property_opts)
-        applicant_income = st.number_input("您的收入", min_value=0)
-        coapplicant_income = st.number_input("您配偶的收入", min_value=0)
-        submit = st.form_submit_button("取得個人化 AI 建議基金")
+# ===== (1) 客戶資料 =====
+st.markdown('<div class="section-header">👤 客戶風險承受度分群</div>', unsafe_allow_html=True)
+with st.form("kyc_form"):
+    name = st.text_input("姓名", "江宏繹")
+    gender = st.selectbox("性別", gender_opts)
+    married = st.selectbox("婚姻狀態", married_opts)
+    dependents = st.selectbox("扶養人數", dependents_opts)
+    education = st.selectbox("教育程度", education_opts)
+    self_emp = st.selectbox("是否自僱", self_emp_opts)
+    property_area = st.selectbox("房地產區域", property_opts)
+    applicant_income = st.number_input("您的收入", min_value=0, value=2000)
+    coapplicant_income = st.number_input("您配偶的收入", min_value=0, value=1000)
+    #product_pref = st.selectbox("偏好金融商品", product_opts)
 
-    if submit:
-        client = {
-            "name": name,
-            "Gender": gender,
-            "Married": married,
-            "Dependents": dependents,
-            "Education": education,
-            "Self_Employed": self_emp,
-            "Property_Area": property_area,
-            "ApplicantIncome": applicant_income,
-            "CoapplicantIncome": coapplicant_income,
-        }
-        st.session_state["client"] = client
-        payload = {"kyc": client}
+    st.markdown('<div class="section-header">🎯 偏好金融商品</div>', unsafe_allow_html=True)
+    st.markdown('<p style="font-size:22px; color:#0070C0; font-weight:bold;">請選擇您有興趣的金融商品：</p>', unsafe_allow_html=True)
+    st.selectbox("偏好金融商品", product_opts, key="product_pref_big")
 
-        try:
-            st.session_state["advice"] = requests.post(
-                f"{GATE}/advise", json=payload, timeout=90
-            ).json()
-            st.session_state["charts"] = {}  # reset charts
-            st.success("✅ 已生成建議，請切換到『個人化 AI 建議基金』")
-        except Exception as e:
-            st.warning(f"無法取得建議：{e}")
+    submit = st.form_submit_button("🚀 取得個人化 AI 建議基金")
 
-# --- Tab2: 基金建議 + 視覺化（含預測，並同時儲存圖表） ---
-with tab2:
-    if "advice" in st.session_state and isinstance(st.session_state["advice"], dict):
-        st.subheader("投資建議基金")
+if submit:
+    client = {
+        "name": name,
+        "Gender": gender,
+        "Married": married,
+        "Dependents": dependents,
+        "Education": education,
+        "Self_Employed": self_emp,
+        "Property_Area": property_area,
+        "ApplicantIncome": applicant_income,
+        "CoapplicantIncome": coapplicant_income,
+        #"ProductPref": product_pref,
+    }
+    st.session_state["client"] = client
+    payload = {"kyc": client}
+    try:
+        st.session_state["advice"] = requests.post(
+            f"{GATE}/advise", json=payload, timeout=90
+        ).json()
+        st.session_state["charts"] = {}
+        #st.success("✅ 已生成建議，請往下查看結果")
+    except Exception as e:
+        st.warning(f"無法取得建議：{e}")
 
-        fund = st.session_state["advice"].get("selected_fund", {}) or {}
-        advice = st.session_state["advice"]
+if "advice" in st.session_state and isinstance(st.session_state["advice"], dict):
+    advice = st.session_state["advice"]
+    debug = advice.get("debug_info", {})
+    risk_type = debug.get("risk_type", "未知")
+    risk_score = debug.get("risk_score", 0.5)
+    st.metric("客戶風險屬性", risk_type, f"{risk_score:.2f}")
 
-        if fund:
-            # ========== 數值型欄位視覺化 ==========
-            st.write("### 基金關鍵數據")
-            col1, col2, col3 = st.columns(3)
+st.divider()
 
-            # Beta
-            if "beta" in fund:
-                with col1:
-                    st.metric(label="Beta", value=f"{fund['beta']:.2f}")
-                    fig, ax = plt.subplots(figsize=(2.5, 2))
-                    ax.bar(["Beta"], [fund["beta"]])
-                    ax.set_ylim(0, max(2.0, fund["beta"] * 1.2))
-                    ax.set_ylabel("值")
-                    st.pyplot(fig)
-                    save_fig_to_session(fig, "fund_beta_bar")
+# ===== (2) 基金推薦流程 =====
 
-            # 費用率
-            if "fee" in fund:
-                with col2:
-                    try:
-                        fee_val = float(fund["fee"]) * 100
-                        st.metric(label="費用率 (%)", value=f"{fee_val:.2f}")
-                        fig, ax = plt.subplots(figsize=(2.5, 2))
-                        ax.bar(["Fee"], [fee_val])
-                        ax.set_ylim(0, max(2.0, fee_val * 1.5))
-                        ax.set_ylabel("%")
-                        st.pyplot(fig)
-                        save_fig_to_session(fig, "fund_fee_bar")
-                    except:
-                        st.metric(label="費用率", value=str(fund["fee"]))
 
-            # 規模 (AUM)
-            if "aum" in fund:
-                with col3:
-                    try:
-                        aum_val = float(fund["aum"])
-                        st.metric(label="基金規模 (NTD百萬)", value=f"{aum_val:,.0f}")
-                        fig, ax = plt.subplots(figsize=(2.5, 2))
-                        ax.bar(["AUM"], [aum_val])
-                        ax.set_ylabel("NTD 百萬")
-                        st.pyplot(fig)
-                        save_fig_to_session(fig, "fund_aum_bar")
-                    except:
-                        st.metric(label="基金規模", value=str(fund["aum"]))
+st.markdown('<div class="section-header">📊 個人化 AI 建議基金篩選過程說明</div>', unsafe_allow_html=True)
 
-            # 風險等級
-            if "risk_level" in fund:
-                st.write("### 風險等級")
-                risk_map = {"RR1": 1, "RR2": 2, "RR3": 3, "RR4": 4, "RR5": 5}
-                r_val = risk_map.get(fund["risk_level"], None)
-                if r_val:
-                    fig, ax = plt.subplots(figsize=(4, 1.5))
-                    ax.barh(["Risk"], [r_val])
-                    ax.set_xlim(0, 5)
-                    ax.set_xlabel("風險等級 (RR1~RR5)")
-                    st.pyplot(fig)
-                    save_fig_to_session(fig, "fund_risk_barh")
-                else:
-                    st.text(f"風險等級: {fund['risk_level']}")
+if "advice" in st.session_state and isinstance(st.session_state["advice"], dict):
+    advice = st.session_state["advice"]
+    fund = advice.get("selected_fund", {}) or {}
+    debug = advice.get("debug_info", {})
 
-            # ========== 分佈型欄位視覺化 ==========
-            if "Top ten holdings" in fund:
-                st.write("### 前十大持股")
-                try:
-                    holdings = {}
-                    for item in fund["Top ten holdings"].split(","):
-                        k, v = item.strip().rsplit(" ", 1)
-                        holdings[k] = float(v.replace("%", ""))
-                    h_df = pd.DataFrame(list(holdings.items()), columns=["Holding", "Weight"])
-                    fig, ax = plt.subplots(figsize=(6, 3))
-                    ax.barh(h_df["Holding"], h_df["Weight"])
-                    ax.set_xlabel("比重 (%)")
-                    st.pyplot(fig)
-                    save_fig_to_session(fig, "holdings_top10_barh")
-                except:
-                    st.text(fund["Top ten holdings"])
-
-            if "Industry allocation" in fund:
-                st.write("### 產業配置")
-                try:
-                    inds = {}
-                    for item in fund["Industry allocation"].split(","):
-                        k, v = item.strip().rsplit(" ", 1)
-                        inds[k] = float(v.replace("%", ""))
-                    i_df = pd.DataFrame(list(inds.items()), columns=["Industry", "Weight"])
-                    fig, ax = plt.subplots(figsize=(6, 3))
-                    ax.pie(i_df["Weight"], labels=i_df["Industry"], autopct="%.1f%%")
-                    st.pyplot(fig)
-                    save_fig_to_session(fig, "industry_allocation_pie")
-                except:
-                    st.text(fund["Industry allocation"])
-
-            if "Country allocation" in fund:
-                st.write("### 國家配置")
-                try:
-                    countries = {}
-                    for item in fund["Country allocation"].split(","):
-                        k, v = item.strip().rsplit(" ", 1)
-                        countries[k] = float(v.replace("%", ""))
-                    c_df = pd.DataFrame(list(countries.items()), columns=["Country", "Weight"])
-                    fig, ax = plt.subplots(figsize=(6, 3))
-                    ax.bar(c_df["Country"], c_df["Weight"])
-                    ax.set_ylabel("比重 (%)")
-                    st.pyplot(fig)
-                    save_fig_to_session(fig, "country_allocation_bar")
-                except:
-                    st.text(fund["Country allocation"])
-
-            # ========== 預測（基金 & 個股）回到 Tab2，畫完圖同時存入 charts ==========
-            # 基金價格預測 (用 P5/Median/P95 的 bar 圖)
-            fc = advice.get("fund_forecast", {}) or {}
-            if fc and "price_scenarios" in fc:
-                st.write("### 基金價格預測 (10日)")
-                vals = [
-                    fc["price_scenarios"].get("P5_10d"),
-                    fc["price_scenarios"].get("Median_10d"),
-                    fc["price_scenarios"].get("P95_10d"),
-                ]
-                labels = ["P5", "Median", "P95"]
-                fig, ax = plt.subplots(figsize=(5, 3))
-                ax.bar(labels, vals)
-                ax.set_ylabel("Price")
-                st.pyplot(fig)
-                save_fig_to_session(fig, "fund_forecast_bar")
-
-                # 若後端已有預測圖（base64 或 data URL），一併存起來
-                if fc.get("forecast_plot"):
-                    save_external_image_to_session(fc["forecast_plot"], "fund_forecast_plot")
-
-            # 基金持股之個股價格預測（折線：每檔畫 P5/Median/P95 三點）
-            stock_fcs = advice.get("stock_forecasts", {}) or {}
-            if stock_fcs:
-                st.write("### 基金持股之個股價格預測 (10日)")
-                # 總覽圖
-                fig, ax = plt.subplots(figsize=(6, 4))
-                for t, sfc in stock_fcs.items():
-                    points_x = ["P5", "Median", "P95"]
-                    points_y = [sfc.get("P5_10d"), sfc.get("Median_10d"), sfc.get("P95_10d")]
-                    ax.plot(points_x, points_y, marker="o", label=t)
-                ax.set_ylabel("Price")
-                ax.legend(fontsize=8, ncols=2)
-                st.pyplot(fig)
-                save_fig_to_session(fig, "stock_forecasts_overview")
-
-                # 若各檔股票有後端提供的圖，也存起來
-                for t, sfc in stock_fcs.items():
-                    if sfc.get("forecast_plot"):
-                        save_external_image_to_session(sfc["forecast_plot"], f"stock_forecast__{t}")
-
-            # ========== 其他文字欄位 ==========
-            st.write("### 基本文字資訊")
-            text_info = {
-                "名稱": fund.get("name", "未知"),
-                "代碼": fund.get("code", "未知"),
-                "成立日期": fund.get("inception", "未知"),
-                "分類": fund.get("category", "未知"),
-                "幣別": fund.get("currency", "未知"),
-                "基金經理人": fund.get("manager", "未知"),
-            }
-            st.table(pd.DataFrame([text_info]))
-
-        # 詢問基金相關問題（RAG：限制 10 秒）
-        st.write("### 詢問基金相關問題")
-        q = st.text_input("請輸入問題（例如：基金風險、投資標的...）")
-        doc_type = st.selectbox("限定文件類型（可選）", ["不限", "月報", "公開說明書"], index=0)
-        if st.button("🔎 發送問題"):
-            if q.strip():
-                selected_fund_code = fund.get("code") or fund.get("fund_code")
-                payload = {"query": q}
-                if selected_fund_code:
-                    payload["fund_code"] = selected_fund_code
-                if doc_type != "不限":
-                    payload["doc_type"] = doc_type
-                try:
-                    rag_resp = requests.post(
-                        f"{GATE}/query", json=payload, timeout=100  # 嚴控 10 秒
-                    ).json()
-                    st.session_state["rag"] = rag_resp
-                    st.success("✅ 已取得知識檢索結果，請切換到『知識檢索與報告』")
-                except Exception as e:
-                    st.warning(f"RAG 逾時或失敗：{e}")
+    # (1) 初始基金池 (Beta 計算)
+    st.markdown("##### ① 初始基金池 (Beta 計算)")
+    all_betas = debug.get("all_fund_betas", {})
+    if all_betas:
+        rows = []
+        for fc, b in all_betas.items():
+            name = fund_name_map_full.get(fc, fc)
+            beta_str = f"{b:.4f}"
+            if b > 1:
+                beta_str = f"<span style='color:red'>{beta_str} </span>"
             else:
-                st.warning("請輸入您的問題！")
+                beta_str = f"<span style='color:green'>{beta_str}</span>"
+            rows.append(f"| {name} | {beta_str} |")
 
-# --- Tab3 ---
-with tab3:
-    if "client" in st.session_state and "advice" in st.session_state:
-        payload = {
-            "client": st.session_state["client"],
-            "advice": st.session_state["advice"],
-            "refs": st.session_state.get("rag", {}),
-            # ❌ 不再把 charts 傳給 report，避免超時
+        md_all = "| 基金名稱 | Beta |\n|---|---|\n" + "\n".join(rows)
+        st.markdown(md_all, unsafe_allow_html=True)
+
+        fig, ax = plt.subplots(figsize=(3,1))
+        labels = [fund_name_map_short.get(fc, fc) for fc in all_betas.keys()]
+        ax.bar(labels, list(all_betas.values()))
+        ax.axhline(1.0, color="red", linestyle="--", label="基準 Beta=1")
+        ax.set_ylabel("Beta", fontsize=5)
+        ax.tick_params(axis="x", labelsize=5)
+        ax.tick_params(axis="y", labelsize=5)
+        ax.legend(fontsize=5, loc="upper right")
+        st.pyplot(fig)
+
+    # (2) 市場熱度
+    st.markdown("##### ② 市場熱度篩選")
+    st.latex(r"熱度分數 = \frac{成交量_{當下} - 成交量平均值_{過去 30 日}}{成交量標準差_{過去 30 日}}")
+    heat_data = debug.get("fund_heat_data", {})
+    if heat_data:
+        rows = []
+        for fc, d in heat_data.items():
+            name = fund_name_map_full.get(fc, fc)
+            score = d.get("rel_volume_score", 0.0)
+            score_str = f"{score:.4f}"
+            if score > 0:
+                score_str = f"<span style='color:orange'>{score_str} </span>"
+            else:
+                score_str = f"<span style='color:blue'>{score_str}</span>"
+            rows.append(f"| {name} | {score_str} |")
+
+        md_heat = "| 基金名稱 | 熱度分數 |\n|---|---|\n" + "\n".join(rows)
+        st.markdown(md_heat, unsafe_allow_html=True)
+
+    # (3) 最終推薦基金
+    st.markdown("##### ③ 最終推薦基金")
+    if fund:
+        text_info = {
+            "基金名稱": fund.get("name", "未知"),
+            "成立日期": fund.get("inception", "未知"),
+            "基金經理人": fund.get("manager", "未知"),
+            "基金規模 (百萬臺幣)": fund.get("aum (NTD million)", "未知"), 
+            "幣別": fund.get("currency", "未知"),
+            "風險等級": fund.get("risk_level", "未知"),
         }
+
+        # 格式化 Beta
         try:
-            resp = requests.post(f"{GATE}/report", json=payload, timeout=60).json()
+            beta_val = float(text_info["Beta"])
+            beta_str = f"{beta_val:.4f}"
+            if beta_val > 1:
+                text_info["Beta"] = f"<span style='color:red'>{beta_str} ⚡</span>"
+            else:
+                text_info["Beta"] = f"<span style='color:green'>{beta_str}</span>"
+        except:
+            pass
 
-            if resp.get("markdown"):
-                st.subheader("📄 投資建議分析報告（Markdown）")
-                st.markdown(resp["markdown"])
-            if resp.get("html"):
-                with st.expander("🔍 查看 HTML 版本"):
-                    st.components.v1.html(resp["html"], height=600, scrolling=True)
-            if resp.get("pdf"):
-                pdf_bytes = base64.b64decode(resp["pdf"])
-                st.download_button(
-                    label="📥 下載 PDF 報告",
-                    data=pdf_bytes,
-                    file_name="report.pdf",
-                    mime="application/pdf",
-                )
+        rows = [f"| {k} | {v} |" for k, v in text_info.items()]
+        md_final = "| 欄位 | 值 |\n|---|---|\n" + "\n".join(rows)
+        st.markdown(md_final, unsafe_allow_html=True)
 
-            # 🚀 新增：直接顯示 Tab2 存下來的圖
-            if "charts" in st.session_state:
-                st.subheader("📊 圖片回顧")
-                for key, b64 in st.session_state["charts"].items():
-                    try:
-                        st.image(base64.b64decode(b64), caption=key)
-                    except Exception:
-                        st.text(f"(無法顯示 {key})")
 
-        except Exception as e:
-            st.error(f"⚠️ 無法生成報告：{e}")
+    # (4) 投資報告（含 RAG 問答）
+    st.markdown("##### ④ 投資建議報告")
+
+    q = st.text_input("請輸入關於系統推薦基金的問題（例如：說服我投資...）")
+
+    if st.button("📑 產生投資報告"):
+        if q.strip():
+            try:
+                # Step 1: 呼叫 RAG 拿回答
+                selected_fund_code = fund.get("code") or fund.get("fund_code")
+                payload_q = {"query": q}
+                if selected_fund_code:
+                    payload_q["fund_code"] = selected_fund_code
+
+                rag_resp = requests.post(
+                    f"{GATE}/query", json=payload_q, timeout=100
+                ).json()
+                st.session_state["rag"] = rag_resp
+                st.session_state["last_question"] = q
+
+                # Step 1.5: 整理過往績效，轉成模板可用的 list of dict
+                code = fund.get("code") or fund.get("fund_code", "")
+                base_code = code.split("_")[0] if code else ""
+                perf = fund_perf_data.get(base_code, {})
+
+                performance_rows = []
+                if perf:
+                    col_order = ["3個月", "1年", "3年", "5年", "成立以來"]
+                    for currency, vals in perf.items():
+                        row = {"currency": currency}
+                        for c in col_order:
+                            val = vals.get(c, None)
+                            if val is not None:
+                                try:
+                                    row[c] = f"{float(val):.2f}"
+                                except:
+                                    row[c] = val
+                            else:
+                                row[c] = "-"
+                        performance_rows.append(row)
+
+                # Step 1.6: 把過往績效與預測圖加到 advice
+                advice_data = st.session_state.get("advice", {})
+                advice_data["performance"] = performance_rows
+
+                fc = advice_data.get("fund_forecast", {})
+                if fc and fc.get("forecast_plot"):
+                    # 確保模板能拿到 base64 預測圖
+                    advice_data.setdefault("fund_forecast", {})["forecast_plot"] = fc["forecast_plot"]
+
+                # Step 2: 呼叫 Report API
+                payload_r = {
+                    "client": st.session_state.get("client", {}),
+                    "advice": advice_data,
+                    "refs": {
+                        "query": q,       # 加上使用者輸入的問題
+                        **rag_resp        # 再合併 RAG 回答 (answer 等欄位)
+                    },
+                }
+                resp = requests.post(f"{GATE}/report", json=payload_r, timeout=180).json()
+                st.session_state["final_report"] = resp
+
+                # Step 3: 直接把報告內容顯示在前端
+                st.markdown("### 📑 個人化投資建議分析報告")
+                st.markdown("---")
+                # 先把 Markdown 轉成 HTML，再加樣式
+                html_report = resp.get("html")  # 後端已用 markdown 套件轉好的 HTML
+                if html_report:
+                    styled_html = f"""
+                    <div style='background-color:#f9f9f9; color:#333; padding:20px; border-radius:10px; line-height:1.6;'>
+                        <style>
+                            h1 {{
+                                color: #1f77b4;
+                                font-size: 22px;
+                                margin-top: 0.2rem;
+                                margin-bottom: 0.6rem;
+                            }}
+                            h2 {{
+                                color: #2ca02c;
+                                font-size: 18px;
+                                margin-top: 0.2rem;
+                                margin-bottom: 0.6rem;
+                            }}
+                            table {{
+                                border-collapse: collapse;
+                                width: 100%;
+                                margin: 8px 0 12px 0;
+                            }}
+                            th, td {{
+                                border: 1px solid #ddd;
+                                padding: 6px 10px;
+                                text-align: center;
+                            }}
+                            th {{
+                                background-color: #f0f0f0;
+                            }}
+                            p {{
+                                margin: 0.2rem 0;
+                            }}
+                        </style>
+                        {html_report}
+                    </div>
+                    """
+                    st.components.v1.html(styled_html, height=700, scrolling=True)
+                else:
+                    # 後援：若後端沒回 html，就直接顯示 markdown（無自訂樣式）
+                    st.markdown(resp.get("markdown", "（無報告內容）"))
+            except Exception as e:
+                st.error(f"❌ 報告生成失敗: {e}")
+        else:
+            st.warning("請輸入您的問題！")
+
+
+
+
+
+
+
+
+
+
+
 
 
 

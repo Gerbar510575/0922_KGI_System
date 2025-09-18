@@ -37,9 +37,8 @@ def md_to_pdf(md_text: str) -> bytes:
 
 @app.post("/report")
 def generate(payload: dict):
-    logger.info("收到 /report 請求")
+    logger.info(f"收到 /report 請求, keys={list(payload.keys())}")
     try:
-        # 直接渲染，不再傳 charts
         md = tpl.render(**payload)
         html = markdown.markdown(md, extensions=["tables"])
         pdf_bytes = md_to_pdf(md)
@@ -53,6 +52,8 @@ def generate(payload: dict):
         logger.error("報告生成失敗")
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"report generation failed: {e}")
+
+
 
 
 

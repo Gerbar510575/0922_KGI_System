@@ -1,7 +1,10 @@
 # Rscript predict.R < stdin JSON
 suppressWarnings(suppressMessages({
   library(jsonlite)
-  library(tidymodels)
+  library(workflows)
+  library(parsnip)
+  library(hardhat)
+  library(glmnet)
 }))
 
 safe_stop <- function(msg) {
@@ -9,9 +12,9 @@ safe_stop <- function(msg) {
   quit(save = "no", status = 1)
 }
 
-# 從 stdin 讀 JSON
+# 從 stdin 讀 JSON (忽略最後換行警告)
 input_text <- tryCatch({
-  paste(readLines(file("stdin")), collapse = "\n")
+  paste(readLines(file("stdin"), warn = FALSE), collapse = "\n")
 }, error = function(e) safe_stop(paste("failed to read stdin:", e$message)))
 
 if (nchar(input_text) == 0) {
@@ -27,9 +30,8 @@ newdata <- tryCatch({
   as.data.frame(payload)
 }, error = function(e) safe_stop(paste("cannot convert to data.frame:", e$message)))
 
-# 載入 model bundle
 model_bundle <- tryCatch({
-  readRDS("crisis_model_bundle.rds")
+  readRDS("/app/models/r/crisis_model_bundle.rds")
 }, error = function(e) safe_stop(paste("failed to load model bundle:", e$message)))
 
 if (is.null(model_bundle$workflow)) safe_stop("bundle missing workflow")

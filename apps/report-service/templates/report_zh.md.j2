@@ -1,12 +1,15 @@
 # 個人化投資建議分析報告
 
-- 投資人姓名：**{{ client.name }}**
+敬愛的 **{{ client.name }}** 貴賓您好，
+感謝您使用本服務，以下為您量身打造的投資建議分析報告，請參考：
 
 ---
 
 ## 一、AI 摘要重點
 {% if refs and refs.answer %}
-{{ refs.answer }}
+Q：{{ refs.query or "-" }}
+  
+A：{{ refs.answer }}
 {% else %}
 (無 AI 摘要)
 {% endif %}
@@ -14,85 +17,49 @@
 ---
 
 ## 二、推薦基金基本資訊
-| 名稱 | 代碼 | 分類 | Beta | 費用率 | 幣別 | 規模 (百萬NTD) | 基金經理人 |
-|---|---|---|---:|---:|:---:|---:|---|
-| {{ advice.selected_fund.name or "-" }} | {{ advice.selected_fund.code or "-" }} | {{ advice.selected_fund.category or "-" }} | {{ advice.selected_fund.beta|default(0)|round(2) }} | {{ advice.selected_fund.fee or "-" }} | {{ advice.selected_fund.currency or "-" }} | {{ advice.selected_fund.aum or "-" }} | {{ advice.selected_fund.manager or "-" }} |
+
+| 名稱 | 成立日期 | 經理人 | 規模 (百萬臺幣) | 幣別 | 風險等級 |
+|---|---|---|---:|:---:|---|
+| {{ advice.selected_fund.name or "-" }} | {{ advice.selected_fund.inception or "-" }} | {{ advice.selected_fund.manager or "-" }} | {{ advice.selected_fund["aum (NTD million)"] or "-" }} | {{ advice.selected_fund.currency or "-" }} | {{ advice.selected_fund.risk_level or "-" }} |
 
 ---
 
-## 三、基金價格預測
-- P5 (10d)：{{ advice.fund_forecast.price_scenarios.P5_10d|default(0)|round(2) }}
-- Median (10d)：{{ advice.fund_forecast.price_scenarios.Median_10d|default(0)|round(2) }}
-- P95 (10d)：{{ advice.fund_forecast.price_scenarios.P95_10d|default(0)|round(2) }}
-
----
-
-## 四、基金持股 Beta 值
-| 股票代碼 | Beta |
-|---|---:|
-{% if advice.stock_betas %}
-{% for t, b in advice.stock_betas.items() -%}
-| {{ t }} | {{ b|default(0)|round(2) }} |
+## 三、過往績效
+{% if advice.performance -%}
+| 幣別 | 3個月 | 1年 | 3年 | 5年 | 成立以來 |
+|---|---:|---:|---:|---:|---:|
+{% for row in advice.performance -%}
+| {{ row.currency }} | {{ row["3個月"] or "-" }} | {{ row["1年"] or "-" }} | {{ row["3年"] or "-" }} | {{ row["5年"] or "-" }} | {{ row["成立以來"] or "-" }} |
 {% endfor %}
-{% else %}
-| (無資料) | - |
+{% else -%}
+(無績效資料)
+{% endif %}
+
+
+---
+
+## 四、基金價格預測 (10日)
+
+- 假設一：根據即時資料進行 1000 次價格模擬。
+- 假設二：查詢當下基金前十大持股標的之加權價格以 100 做為基準。    
+👉 10 日後 1000 次模擬之基金價格有 90% 機率落在 **{{ advice.fund_forecast.price_scenarios.P5_10d|default(0)|round(2) }} ~ {{ advice.fund_forecast.price_scenarios.P95_10d|default(0)|round(2) }}** 區間。  
+👉 再者，1000 次模擬之基金價格中位數為 **{{ advice.fund_forecast.price_scenarios.Median_10d|default(0)|round(2) }}**。
+
+{% if advice.fund_forecast.forecast_plot %}
+![基金模擬價格路徑]({{ advice.fund_forecast.forecast_plot }})
 {% endif %}
 
 ---
 
-## 五、基金持股價格預測
-{% if advice.stock_forecasts %}
-{% for t, fc in advice.stock_forecasts.items() %}
-### {{ t }}
-- P5 (10d)：{{ fc.P5_10d|default(0)|round(2) }}
-- Median (10d)：{{ fc.Median_10d|default(0)|round(2) }}
-- P95 (10d)：{{ fc.P95_10d|default(0)|round(2) }}
-
-{% endfor %}
-{% else %}
-(無個股預測資料)
-{% endif %}
-
----
-
-## 六、市場熱度
-- Relative Volume Score：{{ advice.market_heat.rel_volume_score|default(0)|round(2) }}
-
----
-
-## 七、推薦理由
-{% if advice.explanation %}
-{% for line in advice.explanation -%}
-- {{ line }}
-{% endfor %}
-{% else %}
-- (無推薦理由)
-{% endif %}
-
----
-
-## 八、依據與引用（RAG）
-{% if refs and refs.contexts %}
-{% for h in refs.contexts -%}
-- 基金代碼：{{ h.metadata.fund_code }}
-  基金名稱：{{ h.metadata.fund_name }}
-  類型：{{ h.metadata.doc_type }}
-  截止日期：{{ h.metadata.asof_date or "未知" }}
-  章節：{{ h.metadata.section or "未知" }}
-  頁碼：{{ h.metadata.page or "未知" }}
-  來源檔案：{{ h.metadata.source }}
-  摘要：{{ h.snippet }}
-{% endfor %}
-{% else %}
-- (無引用內容)
-{% endif %}
-
----
-
-## 九、風險揭露與聲明
+## 五、風險揭露與聲明
 本報告為投資建議示範，僅供參考。  
 基金投資有風險，過去績效不代表未來表現。  
 建議搭配完整 KYC 與專業理財顧問諮詢。
+
+
+
+
+
 
 
 
