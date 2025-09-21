@@ -1,11 +1,25 @@
-# 個人化投資建議分析報告
+# 客製化投資建議分析報告
 
-敬愛的 **{{ client.name }}** 貴賓您好，
-感謝您使用本服務，以下為您量身打造的投資建議分析報告，請參考：
+敬愛的 **{{ client.name }}** 貴賓您好，這份是客製化投資建議分析報告。
+
+系統推薦您 **{{ advice.selected_fund.name or "-" }}**
+
+本報告為投資建議示範，僅供參考。  
+基金投資有風險，過去績效不代表未來表現。  
+建議搭配完整 KYC 與專業理財顧問諮詢。
 
 ---
 
-## 一、AI 摘要重點
+## 一、推薦基金基本資訊
+
+| 名稱 | 成立日期 | 經理人 | 規模 (百萬臺幣) | 幣別 | 風險等級 |
+|---|---|---|---:|:---:|---|
+| {{ advice.selected_fund.name or "-" }} | {{ advice.selected_fund.inception or "-" }} | {{ advice.selected_fund.manager or "-" }} | {{ advice.selected_fund["aum (NTD million)"] or "-" }} | {{ advice.selected_fund.currency or "-" }} | {{ advice.selected_fund.risk_level or "-" }} |
+
+
+---
+
+## 二、AI 摘要重點
 {% if refs and refs.answer %}
 Q：{{ refs.query or "-" }}
   
@@ -13,14 +27,6 @@ A：{{ refs.answer }}
 {% else %}
 (無 AI 摘要)
 {% endif %}
-
----
-
-## 二、推薦基金基本資訊
-
-| 名稱 | 成立日期 | 經理人 | 規模 (百萬臺幣) | 幣別 | 風險等級 |
-|---|---|---|---:|:---:|---|
-| {{ advice.selected_fund.name or "-" }} | {{ advice.selected_fund.inception or "-" }} | {{ advice.selected_fund.manager or "-" }} | {{ advice.selected_fund["aum (NTD million)"] or "-" }} | {{ advice.selected_fund.currency or "-" }} | {{ advice.selected_fund.risk_level or "-" }} |
 
 ---
 
@@ -38,23 +44,15 @@ A：{{ refs.answer }}
 
 ---
 
-## 四、基金價格預測 (10日)
+## 四、基金臺幣淨值預測 (10日後)
 
-- 假設一：根據即時資料進行 1000 次價格模擬。
-- 假設二：查詢當下基金前十大持股標的之加權價格以 100 做為基準。    
-👉 10 日後 1000 次模擬之基金價格有 90% 機率落在 **{{ advice.fund_forecast.price_scenarios.P5_10d|default(0)|round(2) }} ~ {{ advice.fund_forecast.price_scenarios.P95_10d|default(0)|round(2) }}** 區間。  
-👉 再者，1000 次模擬之基金價格中位數為 **{{ advice.fund_forecast.price_scenarios.Median_10d|default(0)|round(2) }}**。
+- 使用基金臺幣淨值資料 **{{ advice.fund_forecast.nav_used }}** 當作基準值 (截至 2025/09/18)。   
+👉 根據模型進行 1000 次模擬，預測 10 日後的基金淨值分布，其 **90%** 的模擬結果落在 **{{ advice.fund_forecast.price_scenarios.P5_10d|default(0)|round(2) }} ~ {{ advice.fund_forecast.price_scenarios.P95_10d|default(0)|round(2) }}** 區間。
 
 {% if advice.fund_forecast.forecast_plot %}
 ![基金模擬價格路徑]({{ advice.fund_forecast.forecast_plot }})
 {% endif %}
-
----
-
-## 五、風險揭露與聲明
-本報告為投資建議示範，僅供參考。  
-基金投資有風險，過去績效不代表未來表現。  
-建議搭配完整 KYC 與專業理財顧問諮詢。
+*圖：基金臺幣淨值模擬路徑圖*
 
 
 

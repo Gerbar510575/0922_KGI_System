@@ -1,0 +1,33 @@
+0922_KGI_extracted/
+- 0922_KGI/
+  - 0922_KGI/apps/
+    - 0922_KGI/apps/advisor-service/
+    - 0922_KGI/apps/gateway/
+    - 0922_KGI/apps/market-service/
+    - 0922_KGI/apps/ml-bridge/
+    - 0922_KGI/apps/rag-service/
+    - 0922_KGI/apps/report-service/
+    - 0922_KGI/apps/ui/
+    - 0922_KGI/apps/.env
+    - 0922_KGI/apps/embed_funds.py
+  - 0922_KGI/chroma_db/
+    - 0922_KGI/chroma_db/613f7880-badf-400b-ab9c-2577f4cd7a89/
+    - 0922_KGI/chroma_db/chroma.sqlite3
+  - 0922_KGI/configs/
+    - 0922_KGI/configs/app.env.example
+    - 0922_KGI/configs/rag.yaml
+  - 0922_KGI/data/
+    - 0922_KGI/data/metadata_all_chunked_para.json
+  - 0922_KGI/hf_cache/
+    - 0922_KGI/hf_cache/hub/
+  - 0922_KGI/infra/
+    - 0922_KGI/infra/docker/
+    - 0922_KGI/infra/docker-compose.yml
+  - 0922_KGI/scripts/
+    - 0922_KGI/scripts/bootstrap_demo.sh
+    - 0922_KGI/scripts/run_all.sh
+  - 0922_KGI/.env
+  - 0922_KGI/.env.example
+  - 0922_KGI/.gitignore
+  - 0922_KGI/Makefile
+  - 0922_KGI/README.md

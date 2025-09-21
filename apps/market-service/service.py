@@ -4,6 +4,9 @@ import os, json, time, datetime
 import pandas as pd
 import redis
 import logging
+import json
+HOLDINGS_PATH = os.getenv("HOLDINGS_PATH", "/app/data/holdings.json")
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # --- Yahoo Finance -----------------------------------------------------------
@@ -14,7 +17,7 @@ try:
 except Exception:
     YF_OK = False
 
-# 與你範例一致的 UA
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -39,24 +42,7 @@ def cache_get(key: str):
 def cache_set(key: str, val: Any):
     rds.setex(key, TTL, json.dumps(val))
 
-# --- Local backup (當 Yahoo 抓不到時) -------------------------------------------
-def load_backup() -> pd.DataFrame | None:
-    p = os.path.join(os.path.dirname(__file__), "data", "sample_prices.csv")
-    if os.path.exists(p):
-        df = pd.read_csv(p, parse_dates=["date"])
-        # 標準化欄位名稱以配合後續計算
-        # 假設 sample_prices.csv 欄位為：ticker,date,open,high,low,close,volume
-        rename_map = {
-            "open": "Open",
-            "high": "High",
-            "low": "Low",
-            "close": "Close",
-            "adjclose": "Adj Close",
-            "volume": "Volume",
-        }
-        df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
-        return df
-    return None
+
 
 # --- Yahoo 工具：抓一檔 ticker 的歷史資料，統一欄位 ------------------------------
 def yf_get_history(
@@ -78,7 +64,7 @@ def yf_get_history(
             end_date=str(end_date),
             index_as_date=True,
             interval=interval,
-            headers=HEADERS,   # 你提供的 headers
+            headers=HEADERS,
         )
         if df is None or df.empty:
             return pd.DataFrame()
@@ -123,9 +109,7 @@ def yf_get_histories(
         return all_df
     return pd.DataFrame()
 
-# --- /quotes：用歷史資料算 price / prev_close -----------------------------------
-@app.post("/quotes")
-def quotes(payload: dict):
+
     """
     回傳每一檔：
       {
@@ -189,6 +173,12 @@ def quotes(payload: dict):
 
     cache_set(key, data)
     return {"source": "live" if live_ok else "backup", "data": data}
+
+def load_holdings_map() -> dict:
+    if os.path.exists(HOLDINGS_PATH):
+        with open(HOLDINGS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
 # --- /heat：用成交量算相對熱度 ---------------------------------------------------
 @app.post("/heat")
@@ -254,17 +244,6 @@ def heat(payload: dict):
         logging.info(f"[heat] fallback scores={scores}")
 
     return {"source": "live" if live_ok else "backup", "data": scores}
-
-# === 新增：讀入基金持股對照（fund_code -> [tickers]） ==========================
-import json
-HOLDINGS_PATH = os.getenv("HOLDINGS_PATH", "/app/data/holdings.json")
-
-def load_holdings_map() -> dict:
-    if os.path.exists(HOLDINGS_PATH):
-        with open(HOLDINGS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
 # === 新增：基金熱度（依持股的相對量能分數做均值） ==============================
 @app.post("/fund_heat")
 def fund_heat(payload: dict):
@@ -326,7 +305,7 @@ def fund_heat(payload: dict):
 
     logging.info(f"[fund_heat] result={result}")
     return {"source": source, "data": result}
-
+# --- /history：抓多檔股票的歷史收盤價 -------------------------------------------
 @app.post("/history")
 def history(payload: dict):
     """

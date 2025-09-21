@@ -8,21 +8,18 @@ import traceback
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("gateway")
 
-# Service URLs (注意: 要對應 docker-compose.yml 內的容器名稱與 port)
+# Service URLs
 MKT = os.getenv("MKT_URL", "http://market:8005")
 RAG = os.getenv("RAG_URL", "http://rag:8002")
 ADV = os.getenv("ADV_URL", "http://advisor:8003")
 RPT = os.getenv("RPT_URL", "http://report:8004")
 
 app = FastAPI(title="KFH Advisor Gateway")
-
-
+# ----------------- Health Check -----------------
 @app.get("/health")
 def health():
     return {"ok": True}
-
-
-# ----------------- RAG /auto -----------------
+# ----------------- RAG -----------------
 @app.post("/query")
 async def rag_auto(payload: dict):
     try:
@@ -43,8 +40,6 @@ async def rag_auto(payload: dict):
         logger.error(f"gateway /query error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"gateway /query error: {e}")
-
-
 # ----------------- Advisor -----------------
 @app.post("/advise")
 async def advise(payload: dict):
@@ -66,8 +61,6 @@ async def advise(payload: dict):
         logger.error(f"gateway /advise error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"gateway /advise error: {e}")
-
-
 # ----------------- Report -----------------
 @app.post("/report")
 async def report(payload: dict):

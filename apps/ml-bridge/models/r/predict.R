@@ -5,6 +5,7 @@ suppressWarnings(suppressMessages({
   library(parsnip)
   library(hardhat)
   library(glmnet)
+  library(dplyr)
 }))
 
 safe_stop <- function(msg) {
@@ -29,6 +30,24 @@ payload <- tryCatch({
 newdata <- tryCatch({
   as.data.frame(payload)
 }, error = function(e) safe_stop(paste("cannot convert to data.frame:", e$message)))
+
+# --- 特徵工程 (與訓練時一致) ---
+newdata <- newdata %>%
+  mutate(
+    TotalIncome = ApplicantIncome + CoapplicantIncome,
+    Loan_Monthly_Paid = LoanAmount / Loan_Amount_Term,
+    Income_After_Loan = TotalIncome - LoanAmount,
+    Income_to_LoanRatio = TotalIncome / LoanAmount,
+
+    log_ApplicantIncome   = log(ApplicantIncome + 1),
+    log_LoanAmount        = log(LoanAmount + 1),
+    log_TotalIncome       = log(TotalIncome + 1),
+    log_Loan_Monthly_Paid = log(Loan_Monthly_Paid + 1),
+    log_Income_After_Loan = log(Income_After_Loan + 1),
+    log_Income_to_LoanRatio = log(Income_to_LoanRatio + 1)
+  ) %>%
+  select(-ApplicantIncome, -CoapplicantIncome, -LoanAmount,
+         -TotalIncome, -Loan_Monthly_Paid, -Income_After_Loan, -Income_to_LoanRatio)
 
 model_bundle <- tryCatch({
   readRDS("/app/models/r/crisis_model_bundle.rds")
@@ -67,5 +86,9 @@ cat(toJSON(list(
   threshold = best_thresh,
   method = model_bundle$method
 ), auto_unbox = TRUE))
+
+
+
+
 
 

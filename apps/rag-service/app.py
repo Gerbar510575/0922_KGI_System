@@ -30,7 +30,7 @@ app = FastAPI(title="Fund RAG API (content-only embed + structured answer)", ver
 # ---------------- Google Gemini Client ----------------
 genai_client = genai.Client(api_key=GENAI_API_KEY)
 
-# ---------------- Embedding Function ----------------
+
 is_retriable = lambda e: (
     isinstance(e, genai.errors.APIError) and getattr(e, "code", None) in {429, 503}
 )

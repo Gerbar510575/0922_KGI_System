@@ -51,7 +51,10 @@ def infer_risk_via_bridge(kyc: dict) -> tuple[dict, dict]:
         "Self_Employed": "No",
         "ApplicantIncome": 0,
         "CoapplicantIncome": 0,
-        "Property_Area": "Urban"
+        "Property_Area": "Urban",
+        "LoanAmount": 0,
+        "Loan_Amount_Term": 360,
+        "Credit_History": 1,
     }
 
     # 建立完整輸入
@@ -82,7 +85,6 @@ def infer_risk_via_bridge(kyc: dict) -> tuple[dict, dict]:
         pass
 
     return risk_result, input_data
-
 # ---------------------------------------------------
 # Service: Data Loader
 # ---------------------------------------------------
@@ -90,7 +92,7 @@ def get_daily_returns(tickers: list) -> pd.DataFrame:
     try:
         resp = requests.post(
             f"{MKT}/history",
-            json={"tickers": tickers, "days": 22},
+            json={"tickers": tickers, "days": 120},
             timeout=30
         )
         resp.raise_for_status()
@@ -108,11 +110,10 @@ def get_daily_returns(tickers: list) -> pd.DataFrame:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"get_daily_returns failed: {e}")
     return pd.DataFrame()
-
 # ---------------------------------------------------
 # Service: CAPM
 # ---------------------------------------------------
-def fit_capm(asset_returns: pd.Series, market_returns: pd.Series, rf: float = 0.045/252):
+def fit_capm(asset_returns: pd.Series, market_returns: pd.Series, rf: float = 0.04/252):
     """以 OLS 估 alpha / beta，回傳殘差做之後的 i.i.d. 模擬"""
     y = asset_returns - rf
     X = sm.add_constant(market_returns - rf)
@@ -130,7 +131,6 @@ def fit_capm(asset_returns: pd.Series, market_returns: pd.Series, rf: float = 0.
             "alpha": 0.0, "beta": 0.0, "r2": 0.0,
             "residuals": pd.Series(index=asset_returns.index, dtype=float)
         }
-
 def compute_stock_betas(daily_return: pd.DataFrame) -> dict:
     market_returns = daily_return.mean(axis=1)
     out = {}
@@ -138,7 +138,6 @@ def compute_stock_betas(daily_return: pd.DataFrame) -> dict:
         res = fit_capm(daily_return[t], market_returns)
         out[t] = res["beta"]
     return out
-
 def compute_fund_betas(holdings_map: dict, stock_betas: dict) -> dict:
     fund_betas = {}
     for fc, comps in holdings_map.items():
@@ -148,7 +147,6 @@ def compute_fund_betas(holdings_map: dict, stock_betas: dict) -> dict:
         bvals = [stock_betas.get(t, 0.0) for t in tickers]
         fund_betas[fc] = float(np.dot(weights, bvals))
     return fund_betas
-
 # ---------------------------------------------------
 # Service: CAPM + i.i.d. 殘差 模擬
 # ---------------------------------------------------
@@ -179,11 +177,10 @@ def simulate_stock_paths_iid(alpha, beta, expected_market_excess, residuals: np.
         eps = rng.choice(resid, size=horizon, replace=True)
         for t in range(horizon):
             r = mu + eps[t]
-            price *= np.exp(r)
+            price *= (1 + r)
             path.append(price)
         paths[i, :] = path
     return paths  # (n_sim, horizon+1)
-
 # ---------------------------------------------------
 # 視覺化 & 預測包裝
 # ---------------------------------------------------
@@ -191,26 +188,24 @@ def plot_forecast_with_paths(title: str, horizon: int, simulated_paths: np.ndarr
     plt.figure(figsize=(6, 3))
     k = min(50, simulated_paths.shape[0])
     plt.plot(simulated_paths[:k].T, color="grey", alpha=0.3)
-    plt.plot(range(horizon+1), np.percentile(simulated_paths, 5, axis=0), lw=2, ls="--", label="5%")
-    plt.plot(range(horizon+1), np.median(simulated_paths, axis=0), lw=2, label="50%")
-    plt.plot(range(horizon+1), np.percentile(simulated_paths, 95, axis=0), lw=2, ls="--", label="95%")
+    plt.plot(range(horizon+1), np.percentile(simulated_paths, 5, axis=0), lw=2, ls="--", label="悲觀 （最差情境，下檔風險值）")
+    plt.plot(range(horizon+1), np.median(simulated_paths, axis=0), lw=2, label="基準 （中位情境，最常見走勢）")
+    plt.plot(range(horizon+1), np.percentile(simulated_paths, 95, axis=0), lw=2, ls="--", label="樂觀 （最好情境，上檔潛力值）")
 
     if zh_font:
         plt.title(title, fontproperties=zh_font)
         plt.xlabel("幾天後", fontproperties=zh_font)
-        plt.ylabel("價格", fontproperties=zh_font)
+        plt.ylabel("淨值", fontproperties=zh_font)
     else:
         plt.title(title)
         plt.xlabel("幾天後")
-        plt.ylabel("價格")
+        plt.ylabel("淨值")
 
     plt.legend()
     buf = io.BytesIO()
     plt.savefig(buf, format="png", bbox_inches="tight")
     plt.close()
     return base64.b64encode(buf.getvalue()).decode("utf-8")
-
-
 def forecast_stock_with_plot(ticker: str, daily_return: pd.DataFrame,
                              horizon: int = 10, n_sim: int = 1000):
     series = daily_return[ticker].dropna()
@@ -219,7 +214,7 @@ def forecast_stock_with_plot(ticker: str, daily_return: pd.DataFrame,
 
     # 市場與 CAPM 參數
     market_returns = daily_return.mean(axis=1).loc[series.index]
-    expected_mkt_excess = float((market_returns - 0.045/252).mean())
+    expected_mkt_excess = float((market_returns - 0.04/252).mean())
     res = fit_capm(series, market_returns)
 
     # 基準價（把最後累積乘回 100 的基準）
@@ -255,6 +250,31 @@ def forecast_stock_with_plot(ticker: str, daily_return: pd.DataFrame,
         "forecast_plot": f"data:image/png;base64,{img}"
     }
 
+# ---------------- 真實 NAV 資料 (截至 2025/09/18) ----------------
+FUND_NAVS = {
+    "G006": {  # 凱基雲端趨勢基金
+        "TWD": 56.97,
+        "USD": 56.4808
+    },
+    "G011": {  # 醫院及長照
+        "TWD": 14.65,
+        "USD": 14.6343,
+        "CNY": 10.66
+    },
+    "G012": {  # 環球趨勢
+        "TWD": 12.07,
+        "USD": 11.21,
+        "CNY": 12.32
+    },
+    "G013": {  # 未來移動
+        "TWD": 10.87,
+        "USD": 10.23,
+        "CNY": 11.49,
+        "ZAR": 11.8
+    }
+}
+
+
 def forecast_fund_with_plot(fund_code: str, holdings_map: dict, daily_return: pd.DataFrame,
                             fund_name: str = None,
                             horizon: int = 10, n_sim: int = 1000):
@@ -270,11 +290,18 @@ def forecast_fund_with_plot(fund_code: str, holdings_map: dict, daily_return: pd
             print(f"[警告] {t} 無報酬資料，跳過")
             continue
 
-        # CAPM 參數（用各該股票的對齊市場報酬）
         market_returns = market_returns_all.loc[series.index]
-        expected_mkt_excess = float((market_returns - 0.045/252).mean())
+        expected_mkt_excess = float((market_returns - 0.04/252).mean())
         res = fit_capm(series, market_returns)
-        last_price = float((1.0 + series).cumprod().iloc[-1] * 100.0)
+
+        # === 這裡改成用 TWD NAV 當起始價 ===
+        navs = FUND_NAVS.get(fund_code, {})
+        last_price = navs.get("TWD")  # 預設用 TWD NAV
+        if last_price is None:  
+            if not series.empty:
+                last_price = float((1.0 + series).cumprod().iloc[-1] * 100.0)
+            else:
+                last_price = 100.0
 
         try:
             paths = simulate_stock_paths_iid(
@@ -290,10 +317,8 @@ def forecast_fund_with_plot(fund_code: str, holdings_map: dict, daily_return: pd
     if not stock_paths:
         return {"fund_name": fund_name or fund_code, "error": "基金沒有可用股票模擬"}
 
-    # 基金層級價格路徑 = 權重 * 個股模擬價格 的加總
     fund_paths = np.sum(stock_paths, axis=0)
-
-    img = plot_forecast_with_paths(f"{fund_name or fund_code} 價格預測圖 ({horizon}日)", horizon, fund_paths)
+    img = plot_forecast_with_paths(f"{fund_name or fund_code} 淨值預測圖 ({horizon}日)", horizon, fund_paths)
     last_prices = fund_paths[:, -1]
 
     return {
@@ -303,8 +328,10 @@ def forecast_fund_with_plot(fund_code: str, holdings_map: dict, daily_return: pd
             f"Median_{horizon}d": float(np.percentile(last_prices, 50)),
             f"P95_{horizon}d": float(np.percentile(last_prices, 95)),
         },
-        "forecast_plot": f"data:image/png;base64,{img}"
+        "forecast_plot": f"data:image/png;base64,{img}",
+        "nav_used": last_price,  # 顯示使用的 NAV
     }
+
 
 # ---------------------------------------------------
 # API
@@ -386,8 +413,6 @@ def advise(payload: dict):
         }
     }
     return result
-
-
 @app.post("/forecast_stock")
 def forecast_stock(payload: dict):
     ticker = payload.get("ticker")
@@ -398,16 +423,3 @@ def forecast_stock(payload: dict):
         raise HTTPException(status_code=404, detail=f"找不到 {ticker} 的日報酬資料")
     stock_forecast = forecast_stock_with_plot(ticker, daily_return)
     return {"stock_forecast": stock_forecast}
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    print("❌ 捕獲到未處理錯誤:")
-    traceback.print_exc()
-    return JSONResponse(
-        status_code=500,
-        content={"detail": str(exc)}
-    )
-
-
-
-

@@ -14,11 +14,7 @@ DATA_DIR = BASE_DIR / "data"
 CHROMA_DIR = BASE_DIR / "chroma_db"
 DB_NAME = os.getenv("DB_NAME", "funds")
 
-CHUNKED_FILE_CANDIDATES = [
-    DATA_DIR / "metadata_all_chunked_para.json",
-    DATA_DIR / "metadata_all_chunked.json",
-    DATA_DIR / "metadata_all.json",
-]
+CHUNKED_FILE = DATA_DIR / "metadata_all_chunked_para.json"
 
 GENAI_API_KEY = os.getenv("GENAI_API_KEY", "your_api_key_here")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "models/gemini-embedding-001")
@@ -85,18 +81,16 @@ def clean_metadata(meta: dict) -> dict:
     return cleaned
 
 def load_chunked_records():
-    chosen = None
-    for p in CHUNKED_FILE_CANDIDATES:
-        if p.exists():
-            chosen = p
-            break
-    if not chosen:
-        raise FileNotFoundError("找不到 chunk JSON，請放 metadata_all_chunked_para.json 於 data/")
-    with open(chosen, "r", encoding="utf-8") as f:
+    if not CHUNKED_FILE.exists():
+        raise FileNotFoundError("❌ 找不到 metadata_all_chunked_para.json，請確認 data/ 目錄下有此檔案")
+
+    with open(CHUNKED_FILE, "r", encoding="utf-8") as f:
         records = json.load(f)
+
     if not isinstance(records, list) or not records:
-        raise RuntimeError("chunk JSON 格式錯誤或為空")
-    return records, chosen.name
+        raise RuntimeError("❌ metadata_all_chunked_para.json 格式錯誤或為空")
+
+    return records, CHUNKED_FILE.name
 
 # ---------------- Main ----------------
 def main():

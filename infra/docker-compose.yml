@@ -107,6 +107,7 @@ services:
       - ../apps/ui:/app
       - ../apps/ui/data:/app/data:ro
       - ../apps/ui/data/train.csv:/app/data/train.csv:ro
+      - ../data:/app/data
     depends_on:
       - gateway
     ports:
