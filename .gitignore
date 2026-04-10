@@ -6,19 +6,39 @@ __pycache__/
 .venv/
 env/
 venv/
+*.egg-info/
+dist/
+build/
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# Environment / Secrets
+.env
+*.env.local
+*.env.*.local
+
+# ChromaDB runtime data
+chroma_db/
+
+# R history / IDE artifacts
+.Rhistory
+.Rapp.history
+.RData
 
 # Data / outputs
 apps/rag-service/data/docs/*
 !apps/rag-service/data/docs/.keep
 
-# Env
-.env
-
 # Cache
 *.log
 .cache/
 .pytest_cache/
+__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db
