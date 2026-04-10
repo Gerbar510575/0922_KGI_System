@@ -35,6 +35,11 @@ def md_to_pdf(md_text: str) -> bytes:
     doc.build(story)
     return buf.getvalue()
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.post("/report")
 def generate(payload: dict):
     logger.info(f"收到 /report 請求, keys={list(payload.keys())}")

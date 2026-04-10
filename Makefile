@@ -1,6 +1,6 @@
 COMPOSE=infra/docker-compose.yml
 
-.PHONY: up down build logs ps reindex restart clean
+.PHONY: up down build logs ps reindex restart clean test lint
 
 up:
 	@docker compose -f $(COMPOSE) up -d redis ml-bridge rag gateway advisor report market ui
@@ -27,4 +27,10 @@ restart:
 
 clean:
 	@docker compose -f $(COMPOSE) down -v
+
+test:
+	@python -m pytest tests/ -v
+
+lint:
+	@python -m ruff check apps/
 

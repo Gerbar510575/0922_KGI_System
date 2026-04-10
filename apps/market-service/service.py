@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from typing import List, Dict, Any
+from concurrent.futures import ThreadPoolExecutor
 import os, json, time, datetime
 import pandas as pd
 import redis
@@ -95,21 +96,50 @@ def yf_get_histories(
     interval: str = "1d",
 ) -> pd.DataFrame:
     """
-    抓多檔 ticker 的最近 N 天資料（寬鬆一點抓 N+5 天），合併成一張表。
+    並發抓多檔 ticker 的最近 N 天資料，合併成一張表。
+    使用 ThreadPoolExecutor 減少串行等待時間。
     """
+    if not tickers:
+        return pd.DataFrame()
+
     end_date = datetime.date.today()
     start_date = end_date - datetime.timedelta(days=max(days + 5, 7))
+
+    def fetch(t: str) -> pd.DataFrame:
+        return yf_get_history(t, start_date, end_date, interval=interval)
+
+    max_workers = min(len(tickers), 8)
     frames = []
-    for t in tickers:
-        df = yf_get_history(t, start_date, end_date, interval=interval)
-        if not df.empty:
-            frames.append(df)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        for df in pool.map(fetch, tickers):
+            if not df.empty:
+                frames.append(df)
+
     if frames:
-        all_df = pd.concat(frames).reset_index()  # date 變回欄位
-        return all_df
+        return pd.concat(frames).reset_index()  # date 變回欄位
     return pd.DataFrame()
 
 
+BACKUP_CSV_PATH = os.getenv("BACKUP_CSV_PATH", "/app/data/backup.csv")
+
+def load_backup() -> pd.DataFrame | None:
+    """
+    載入備援歷史資料 CSV（欄位需含 ticker / date / Close / Volume）。
+    檔案不存在時回傳 None，呼叫端視為無備援資料。
+    """
+    if not os.path.exists(BACKUP_CSV_PATH):
+        logging.warning(f"[load_backup] 備援檔案不存在：{BACKUP_CSV_PATH}")
+        return None
+    try:
+        df = pd.read_csv(BACKUP_CSV_PATH, parse_dates=["date"])
+        return df
+    except Exception:
+        logging.exception(f"[load_backup] 讀取備援檔案失敗：{BACKUP_CSV_PATH}")
+        return None
+
+
+@app.post("/quotes")
+def quotes(payload: dict):
     """
     回傳每一檔：
       {
@@ -173,6 +203,17 @@ def yf_get_histories(
 
     cache_set(key, data)
     return {"source": "live" if live_ok else "backup", "data": data}
+
+@app.get("/health")
+def health():
+    """驗證 Redis 連線是否正常。"""
+    try:
+        rds.ping()
+        return {"status": "ok", "redis": "connected"}
+    except Exception as e:
+        logging.exception("health check Redis 連線失敗")
+        return {"status": "degraded", "redis": f"error: {e}"}
+
 
 def load_holdings_map() -> dict:
     if os.path.exists(HOLDINGS_PATH):

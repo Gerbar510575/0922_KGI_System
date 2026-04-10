@@ -4,26 +4,38 @@ services:
       context: ..
       dockerfile: infra/docker/ml-bridge/Dockerfile
     container_name: ml-bridge
+    restart: unless-stopped
     environment:
       MLBRIDGE_CONFIG: /app/config/models.yaml
       SUBPROC_TIMEOUT: 15
     volumes:
       - ../apps/ml-bridge:/app
-      - C:/Users/gerbar/Desktop/0922_KGI/apps/ml-bridge/models/r/crisis_model_bundle.rds:/app/models/r/crisis_model_bundle.rds:ro
     ports:
       - "7000:7000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   redis:
     image: redis:7-alpine
     container_name: redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
 
   rag:
     build:
       context: ..
       dockerfile: infra/docker/rag-service/Dockerfile
     container_name: rag
+    restart: unless-stopped
     env_file:
       - ../.env
     environment:
@@ -34,86 +46,121 @@ services:
       - ../chroma_db:/app/chroma_db
       - ../hf_cache/hub:/root/.cache/huggingface/hub
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     ports:
       - "8002:8002"
     command: uvicorn apps.rag-service.app:app --host 0.0.0.0 --port 8002
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   gateway:
     build:
       context: ..
       dockerfile: infra/docker/gateway/Dockerfile
     container_name: gateway
+    restart: unless-stopped
     env_file:
       - ../.env
     volumes:
       - ../apps/gateway:/app
     depends_on:
-      - rag
-      - advisor
-      - report
+      rag:
+        condition: service_healthy
+      advisor:
+        condition: service_healthy
+      report:
+        condition: service_started
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   advisor:
     build:
       context: ..
       dockerfile: infra/docker/advisor-service/Dockerfile
     container_name: advisor
+    restart: unless-stopped
     env_file:
       - ../.env
     volumes:
       - ../apps/advisor-service:/app
     depends_on:
-      - market
-      - ml-bridge
+      market:
+        condition: service_healthy
+      ml-bridge:
+        condition: service_healthy
     ports:
       - "8003:8003"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   report:
     build:
       context: ..
       dockerfile: infra/docker/report-service/Dockerfile
     container_name: report
+    restart: unless-stopped
     env_file:
       - ../.env
     volumes:
       - ../apps/report-service:/app
     ports:
       - "8004:8004"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   market:
     build:
       context: ..
       dockerfile: infra/docker/market-service/Dockerfile
     container_name: market
+    restart: unless-stopped
     env_file:
       - ../.env
     volumes:
       - ../apps/market-service:/app
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     ports:
       - "8005:8005"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   ui:
     build:
       context: ..
       dockerfile: infra/docker/ui/Dockerfile
     container_name: ui
+    restart: unless-stopped
     env_file:
       - ../.env
     volumes:
       - ../apps/ui:/app
       - ../apps/ui/data:/app/data:ro
-      - ../apps/ui/data/train.csv:/app/data/train.csv:ro
       - ../data:/app/data
     depends_on:
-      - gateway
+      gateway:
+        condition: service_healthy
     ports:
       - "8501:8501"
 
 volumes:
   chroma_db:
-
-

@@ -3,12 +3,17 @@ from fastapi import FastAPI, HTTPException
 import pandas as pd, os, json, numpy as np, requests, math
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
-import io, base64
+import io, base64, logging
 from fastapi import Request
-import traceback
 from fastapi.responses import JSONResponse
 import matplotlib
 import matplotlib.font_manager as fm
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+)
+logger = logging.getLogger("advisor")
 
 # === 初始化 FastAPI ===
 app = FastAPI(title="Advisor Service")
@@ -21,6 +26,10 @@ funds = pd.read_csv(FUNDS_PATH)
 MKT = os.getenv("MKT_URL", "http://market:8005")
 MLB = os.getenv("ML_BRIDGE_URL", "http://ml-bridge:7000")
 
+# 模組層級載入 holdings，避免每次請求重複讀檔 / file handle 洩漏
+with open(HOLDINGS_PATH, "r", encoding="utf-8") as _f:
+    HOLDINGS_MAP: dict = json.load(_f)
+
 # ---------------- 自動尋找中文字型 ----------------
 def set_chinese_font():
     import matplotlib.font_manager as fm
@@ -32,9 +41,9 @@ def set_chinese_font():
         if os.path.exists(font_path):
             zh_font = fm.FontProperties(fname=font_path)
             matplotlib.rcParams["font.family"] = zh_font.get_name()
-            print(f"✅ 使用中文字型: {zh_font.get_name()}")
+            logger.info(f"使用中文字型: {zh_font.get_name()}")
             return zh_font
-    print("⚠️ 找不到中文字型，中文可能亂碼")
+    logger.warning("找不到中文字型，中文可能亂碼")
     return None
 zh_font = set_chinese_font()
 
@@ -82,7 +91,7 @@ def infer_risk_via_bridge(kyc: dict) -> tuple[dict, dict]:
             p = float(prob[0]) if isinstance(prob, list) else float(prob)
             risk_result = {"type": "高風險承受度族群" if p > 0.6 else "低風險承受度族群", "p": p}
     except Exception:
-        pass
+        logger.exception("infer_risk_via_bridge 呼叫 ML Bridge 失敗，使用預設風險值")
 
     return risk_result, input_data
 # ---------------------------------------------------
@@ -228,7 +237,7 @@ def forecast_stock_with_plot(ticker: str, daily_return: pd.DataFrame,
             horizon=horizon, n_sim=n_sim
         )
     except Exception as e:
-        print(f"[警告] 股票 {ticker} 模擬失敗：{e}")
+        logger.warning(f"股票 {ticker} 模擬失敗：{e}")
         return {"ticker": ticker, "error": f"simulate failed: {e}"}
 
     # 圖與分位數
@@ -236,11 +245,13 @@ def forecast_stock_with_plot(ticker: str, daily_return: pd.DataFrame,
     last_prices = paths[:, -1]
 
         # ===== Debug 印出 =====
-    print(f"[DEBUG] {ticker} 模擬結果前10筆: {last_prices[:10]}")
-    print(f"[DEBUG] {ticker} 分位數 -> "
-          f"P5={np.percentile(last_prices,5)}, "
-          f"Median={np.percentile(last_prices,50)}, "
-          f"P95={np.percentile(last_prices,95)}")
+    logger.debug(f"{ticker} 模擬結果前10筆: {last_prices[:10]}")
+    logger.debug(
+        f"{ticker} 分位數 -> "
+        f"P5={np.percentile(last_prices,5):.4f}, "
+        f"Median={np.percentile(last_prices,50):.4f}, "
+        f"P95={np.percentile(last_prices,95):.4f}"
+    )
 
     return {
         "ticker": ticker,
@@ -287,7 +298,7 @@ def forecast_fund_with_plot(fund_code: str, holdings_map: dict, daily_return: pd
     for i, t in enumerate(tickers):
         series = daily_return[t].dropna()
         if series.empty:
-            print(f"[警告] {t} 無報酬資料，跳過")
+            logger.warning(f"{t} 無報酬資料，跳過")
             continue
 
         market_returns = market_returns_all.loc[series.index]
@@ -311,7 +322,7 @@ def forecast_fund_with_plot(fund_code: str, holdings_map: dict, daily_return: pd
             )
             stock_paths.append(weights[i] * paths)
         except Exception as e:
-            print(f"[警告] 股票 {t} 模擬失敗：{e}")
+            logger.warning(f"股票 {t} 模擬失敗：{e}")
             continue
 
     if not stock_paths:
@@ -336,13 +347,18 @@ def forecast_fund_with_plot(fund_code: str, holdings_map: dict, daily_return: pd
 # ---------------------------------------------------
 # API
 # ---------------------------------------------------
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.post("/advise")
 def advise(payload: dict):
     kyc = payload.get("kyc", {})
     risk_info, final_input = infer_risk_via_bridge(kyc)
     p_value = risk_info["p"]
 
-    holdings_map = json.load(open(HOLDINGS_PATH, "r", encoding="utf-8"))
+    holdings_map = HOLDINGS_MAP
     tickers = list({t for fc in holdings_map for t in holdings_map[fc]})
     daily_return = get_daily_returns(tickers)
 
